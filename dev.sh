@@ -11,14 +11,13 @@
 #   ./dev.sh setup [svc...]  venvs, deps, .env scaffolding
 #   ./dev.sh doctor          what is ready, what is blocked, and why
 #   ./dev.sh test            offline suites (zero credentials)
-#   ./dev.sh eval [args...]  summarizer eval suite (needs ANTHROPIC_API_KEY)
 #   ./dev.sh up [svc...]     start services whose credentials are present
 #   ./dev.sh down [svc...]   stop them
 #   ./dev.sh status          which services are up
 #   ./dev.sh logs <svc>      tail a service log
 #   ./dev.sh secrets         status of the central secrets file (values masked)
 #   ./dev.sh secrets init    create it from the values already in the .env files
-#   ./dev.sh secrets apply   copy it into every service .env (setup/up/eval do this too)
+#   ./dev.sh secrets apply   copy it into every service .env (setup/up do this too)
 #   ./dev.sh secrets pull    refresh it from GCP Secret Manager
 #
 # services: embedding pipeline question backend frontend
@@ -309,18 +308,13 @@ cmd_doctor() {
 
   head1 "WHAT YOU CAN DO RIGHT NOW"
   info "./dev.sh test    offline suites, zero credentials"
-  if [ -n "$(env_val "$ROOT/apps/backend/.env" ANTHROPIC_API_KEY 2>/dev/null || true)" ]; then
-    info "./dev.sh eval    eval suite (ANTHROPIC_API_KEY found)"
-  else
-    warn "./dev.sh eval  blocked: set ANTHROPIC_API_KEY (./dev.sh secrets)"
-  fi
   if [ "$blocked" -gt 0 ]; then
     printf '\n  %s%s service(s) blocked.%s Supabase keys: Dashboard -> Project Settings -> API.\n' "$C_YEL" "$blocked" "$C_RESET"
   fi
 }
 
 # ─────────────────────────────────────────────────────────────
-# test / eval
+# test
 # ─────────────────────────────────────────────────────────────
 cmd_test() {
   head1 "OFFLINE SUITES (no credentials)"
@@ -331,23 +325,9 @@ cmd_test() {
   else
     warn "libs/skills venv missing -> ./dev.sh setup"; rc=1
   fi
-  if [ -x "$ROOT/apps/backend/venv/bin/python" ]; then
-    say ""; say "  eval structural checks (no LLM):"
-    ( cd "$ROOT/apps/backend" && ./venv/bin/python -m evals.run --n 1 --no-judge ) || rc=1
-  else
-    warn "backend venv missing -> ./dev.sh setup backend"
-  fi
+  say ""; say "  module boundaries:"
+  python3 "$ROOT/scripts/check_boundaries.py" || rc=1
   return $rc
-}
-
-cmd_eval() {
-  local dir="$ROOT/apps/backend"
-  [ -x "$dir/venv/bin/python" ] || die "backend venv missing. Run: ./dev.sh setup backend"
-  secrets_apply
-  [ -n "$(env_val "$dir/.env" ANTHROPIC_API_KEY 2>/dev/null || true)" ] || die "ANTHROPIC_API_KEY is empty in backend/.env"
-  head1 "EVAL SUITE"
-  if [ "$#" -eq 0 ]; then ( cd "$dir" && ./venv/bin/python -m evals.run --suite summarizer --n 3 )
-  else ( cd "$dir" && ./venv/bin/python -m evals.run "$@" ); fi
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -561,7 +541,7 @@ cmd_logs() {
   tail -f "$LOGS/$1.log"
 }
 
-usage() { sed -n '2,47p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
+usage() { sed -n '2,46p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
 
 main() {
   local cmd="${1:-default}"; [ "$#" -gt 0 ] && shift || true
@@ -571,7 +551,6 @@ main() {
     setup)          cmd_setup "$@" ;;
     doctor|check)   cmd_doctor ;;
     test)           cmd_test ;;
-    eval)           cmd_eval "$@" ;;
     up|start)       cmd_up "$@" ;;
     down|stop)      cmd_down "$@" ;;
     status|ps)      cmd_status ;;

@@ -101,8 +101,7 @@ QuantAgent/
     │   ├── db.py             Supabase data access
     │   ├── auth.py           Supabase JWT verification
     │   ├── files/            upload, parse and preview (pdf/docx/xlsx/csv/txt)
-    │   ├── migrations/       SQL migrations
-    │   └── evals/            offline eval suite — see apps/backend/evals/README.md
+    │   └── migrations/       SQL migrations
     ├── web/                  React + Vite (src/pages: Chat, Briefing, Watchlist, Login, Signup)
     ├── summarization/        question service + summary CLI
     ├── pipeline/             ingestion + live-lookup API
@@ -153,7 +152,7 @@ of truth for every table in the project).
 
 Shared credentials live in **one** file outside every repo,
 `~/.config/quantagent/secrets.env` (override with `QUANT_SECRETS_FILE`). Edit
-only that file; `./dev.sh setup`, `up` and `eval` copy its values into each
+only that file; `./dev.sh setup` and `up` copy its values into each
 service `.env` automatically.
 
 ```bash
@@ -181,20 +180,6 @@ only, it bypasses RLS.
 `your-supabase-service-role-key`) as missing, so copying `.env.example` by hand
 will not fool it.
 
-## Evals
-
-`backend/evals/` is an offline eval suite for `summarizer.py`: deterministic
-structural checks first, then a claim-level LLM judge for faithfulness.
-
-```bash
-./dev.sh eval                 # n=3 per fixture, thresholds enforced, exit 1 on failure
-./dev.sh eval --no-judge      # structural checks only — free and instant
-```
-
-It needs only `ANTHROPIC_API_KEY` — no Supabase, no running services. See
-[`apps/backend/evals/README.md`](apps/backend/evals/README.md) for what is measured, the
-thresholds, and the design notes.
-
 ## Deployment
 
 `./deploy.sh` builds and deploys each service to Cloud Run — see
@@ -210,7 +195,6 @@ degrades to RAG on every request.
 ./dev.sh setup [svc...]  # venvs, deps, .env scaffolding
 ./dev.sh doctor          # what is ready, what is blocked, and why
 ./dev.sh test            # offline suites — zero credentials needed
-./dev.sh eval            # summarizer eval suite (needs ANTHROPIC_API_KEY)
 ./dev.sh up [svc...]     # start services; refuses any with missing credentials
 ./dev.sh down / status / logs <svc>
 ```
