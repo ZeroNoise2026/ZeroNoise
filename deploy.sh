@@ -16,10 +16,10 @@
 #   ./deploy.sh status              revisions and traffic
 #   ./deploy.sh rollback <svc>      send 100% traffic back to the previous revision
 #   ./deploy.sh logs <svc>          tail Cloud Run logs
-#   ./deploy.sh cors <origin>       point the backend's CORS at your Vercel domain
+#   ./deploy.sh cors <origin>       point the API's CORS at your Vercel domain
 #   ./deploy.sh frontend            what to run on the Vercel side
 #
-# cloud services: embedding question backend
+# cloud services: embedding api
 #   (frontend lives on Vercel — see `./deploy.sh frontend`)
 #
 # Config, in order of precedence: environment > .deployrc > gcloud defaults
@@ -41,7 +41,7 @@ RC_FILE="$ROOT/.deployrc"
 
 REGION="${DEPLOY_REGION:-us-central1}"
 AR_REPO="${AR_REPO:-quantagent}"
-CLOUD_SERVICES="embedding question backend"
+CLOUD_SERVICES="embedding api"
 ALL_CLOUD_SERVICES="$CLOUD_SERVICES"
 
 # ─────────────────────────────────────────────────────────────
@@ -67,8 +67,7 @@ die()   { printf '\n%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 svc_dir() {
   case "$1" in
     embedding) echo "$ROOT/apps/embedding" ;;
-    question)  echo "$ROOT/apps/summarization" ;;
-    backend)   echo "$ROOT/apps/backend" ;;
+    api)       echo "$ROOT/apps/api" ;;
     *) return 1 ;;
   esac
 }
@@ -76,7 +75,7 @@ svc_dir() {
 # the image can COPY them; the rest build from their own app directory.
 svc_context() {
   case "$1" in
-    backend|question) echo "$ROOT" ;;
+    api) echo "$ROOT" ;;
     *)                svc_dir "$1" ;;
   esac
 }
@@ -85,8 +84,7 @@ svc_context() {
 svc_dockerfile() {
   case "$1" in
     embedding) echo "Dockerfile" ;;
-    question)  echo "apps/summarization/Dockerfile.question" ;;   # relative to svc_context
-    backend)   echo "apps/backend/Dockerfile" ;;   # relative to svc_context
+    api)       echo "apps/api/Dockerfile" ;;   # relative to svc_context
   esac
 }
 svc_run_name() { echo "qa-$1"; }
@@ -94,8 +92,7 @@ svc_sa_id()    { echo "qa-$1"; }
 svc_label() {
   case "$1" in
     embedding) echo "embedding-service (vectors)" ;;
-    question)  echo "question-service (RAG Q&A)" ;;
-    backend)   echo "backend (BFF)" ;;
+    api)       echo "API: auth, user data, chat, RAG" ;;
   esac
 }
 # Secrets pulled from Secret Manager at runtime — never baked into the revision.
@@ -103,8 +100,7 @@ svc_secret_vars() {
   case "$1" in
     embedding) echo "" ;;
     pipeline)  echo "SUPABASE_KEY FINNHUB_API_KEY FMP_API_KEY" ;;
-    question)  echo "SUPABASE_KEY ANTHROPIC_API_KEY FINNHUB_API_KEY FMP_API_KEY" ;;
-    backend)   echo "SUPABASE_KEY SUPABASE_JWT_SECRET ANTHROPIC_API_KEY" ;;
+    api)       echo "SUPABASE_KEY SUPABASE_JWT_SECRET ANTHROPIC_API_KEY FINNHUB_API_KEY FMP_API_KEY" ;;
   esac
 }
 # Non-secret config, copied verbatim from the service's local .env.
@@ -112,8 +108,7 @@ svc_plain_vars() {
   case "$1" in
     embedding) echo "EMBEDDING_MODEL EMBEDDING_DIM" ;;
     pipeline)  echo "SUPABASE_URL EDGAR_USER_AGENT DEFAULT_TICKERS" ;;
-    question)  echo "SUPABASE_URL LLM_MODEL_SUMMARY LLM_MODEL_QA LLM_MODEL_CLASSIFY LLM_EFFORT_QA" ;;
-    backend)   echo "SUPABASE_URL LLM_MODEL LLM_EFFORT ALLOWED_ORIGINS ALLOWED_ORIGIN_REGEX" ;;
+    api)       echo "SUPABASE_URL LLM_MODEL LLM_EFFORT LLM_MODEL_SUMMARY LLM_MODEL_QA LLM_MODEL_CLASSIFY LLM_EFFORT_QA ALLOWED_ORIGINS ALLOWED_ORIGIN_REGEX" ;;
   esac
 }
 # Which upstream URLs this service needs injected. Resolved at deploy time from
@@ -122,8 +117,7 @@ svc_wired_vars() {
   case "$1" in
     embedding) echo "" ;;
     pipeline)  echo "EMBEDDING_SERVICE_URL" ;;
-    question)  echo "EMBEDDING_SERVICE_URL" ;;
-    backend)   echo "EMBEDDING_SERVICE_URL QUESTION_SERVICE_URL" ;;
+    api)       echo "EMBEDDING_SERVICE_URL" ;;
   esac
 }
 # memory cpu min-instances max-instances concurrency timeout
@@ -136,8 +130,7 @@ svc_sizing() {
   case "$1" in
     embedding) echo "2Gi 1 0 3 8 300" ;;
     pipeline)  echo "512Mi 1 0 2 20 900" ;;
-    question)  echo "512Mi 1 0 5 40 600" ;;
-    backend)   echo "512Mi 1 0 5 40 600" ;;
+    api)       echo "512Mi 1 0 5 40 600" ;;
   esac
 }
 validate_svc() { svc_dir "$1" >/dev/null 2>&1 || die "unknown service: $1 (have: $ALL_CLOUD_SERVICES)"; }
@@ -207,7 +200,6 @@ live_url() {
 url_var_for() {
   case "$1" in
     EMBEDDING_SERVICE_URL) echo "embedding" ;;
-    QUESTION_SERVICE_URL)  echo "question" ;;
   esac
 }
 
@@ -493,7 +485,7 @@ cmd_deploy() {
   local svcs ordered="" s; svcs="$(resolve_svcs "$@")"
   # Dependency order: vectors -> live lookups -> RAG -> BFF. Each step resolves
   # the URLs of everything before it, so wiring is never hand-copied.
-  for s in embedding question backend; do
+  for s in embedding api; do
     case " $svcs " in *" $s "*) ordered="$ordered $s" ;; esac
   done
   head1 "DEPLOY  ($(project_id) / $REGION)"
@@ -559,16 +551,16 @@ cmd_logs() {
 cmd_cors() {
   [ "$#" -ge 1 ] || die "usage: ./deploy.sh cors https://your-app.vercel.app"
   local origins; origins="$(printf '%s' "$*" | tr ' ' ',')"
-  gcloud run services update "$(svc_run_name backend)" --region "$REGION" \
+  gcloud run services update "$(svc_run_name api)" --region "$REGION" \
     --update-env-vars "^@^ALLOWED_ORIGINS=$origins@ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app" \
     --quiet >/dev/null
-  ok "backend CORS -> $origins (+ preview deploys via regex)"
+  ok "api CORS -> $origins (+ preview deploys via regex)"
   info "also mirror this into .env so the next full deploy keeps it"
 }
 
 cmd_frontend() {
-  local burl; burl="$(live_url backend 2>/dev/null || true)"
-  [ -n "$burl" ] || die "backend is not deployed yet — ./deploy.sh deploy backend first"
+  local burl; burl="$(live_url api 2>/dev/null || true)"
+  [ -n "$burl" ] || die "api is not deployed yet — ./deploy.sh deploy api first"
   head1 "VERCEL"
   say "  The frontend is a static Vite build; it is not deployed by this script."
   say ""
@@ -576,7 +568,7 @@ cmd_frontend() {
   say "    vercel env add VITE_API_URL production      # paste: $burl"
   say "    vercel --prod"
   say ""
-  say "  Then point the backend back at whatever domain Vercel gave you:"
+  say "  Then point the API back at whatever domain Vercel gave you:"
   say ""
   say "    ./deploy.sh cors https://<your-app>.vercel.app"
   say ""

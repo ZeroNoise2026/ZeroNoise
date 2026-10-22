@@ -13,8 +13,13 @@ import queue
 import time
 
 from config import HOT_PROMOTION_THRESHOLD
-from shared.db import is_tracked, is_ingested, promote_ticker
-from shared.db import record_ticker_query, count_recent_ticker_queries
+from question.db import (
+    count_recent_ticker_queries,
+    is_ingested,
+    is_tracked,
+    promote_ticker,
+    record_ticker_query,
+)
 from research.data import get_earnings, get_price_snapshots
 from question.models import AskRequest, Intent, QueryMode, Source
 from question.router import router

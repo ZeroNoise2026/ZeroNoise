@@ -1,7 +1,7 @@
-# Cloud Run-ready Dockerfile for the backend (FastAPI BFF).
+# Cloud Run-ready Dockerfile for apps/api (FastAPI).
 # Build context is the REPO ROOT (see deploy.sh svc_context), so the image can
 # include the shared libs/ packages:
-#   docker build -f apps/backend/Dockerfile .
+#   docker build -f apps/api/Dockerfile .
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -11,10 +11,11 @@ WORKDIR /app
 COPY libs/common /libs/common
 COPY libs/research /libs/research
 COPY libs/skills /libs/skills
-COPY apps/backend/requirements.txt .
-RUN pip install --no-cache-dir /libs/common /libs/research /libs/skills -r requirements.txt
+COPY libs/marketdata /libs/marketdata
+COPY apps/api/requirements.txt .
+RUN pip install --no-cache-dir /libs/common /libs/research /libs/skills /libs/marketdata -r requirements.txt
 
-COPY apps/backend/ .
+COPY apps/api/ .
 
 # Cloud Run sets $PORT (default 8080). uvicorn must bind to it.
 ENV PORT=8080

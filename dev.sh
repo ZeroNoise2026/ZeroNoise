@@ -18,18 +18,19 @@
 #   ./dev.sh env             which keys in .env are set (values masked)
 #   ./dev.sh env pull        fill .env's secrets from GCP Secret Manager
 #
-# services: embedding question backend frontend
+# services: embedding api frontend
 #
 # Layout
 #
-#   apps/backend        FastAPI BFF                       (service: backend)
-#   apps/web            React frontend                    (service: frontend)
-#   apps/summarization  question service + summary CLI    (service: question)
+#   apps/api            FastAPI: auth, user data, chat, RAG   (service: api)
+#   apps/web            React frontend                        (service: frontend)
+#   apps/embedding      embedding API                         (service: embedding)
+#   apps/summarization  summary CLI (batch)
 #   apps/pipeline       batch ingestion (a job, not a service)
-#   apps/embedding      embedding API                     (service: embedding)
 #   libs/common         Claude client, Supabase client, audit log
 #   libs/research       ticker context, report generation + cache
 #   libs/skills         skill framework: registry, LLM router, built-in skills
+#   libs/marketdata     Finnhub / FMP / EDGAR clients
 #
 # Rule: apps never import each other. Code two apps need goes in libs/.
 #
@@ -48,7 +49,7 @@ STATE="$ROOT/.devstack"
 LOGS="$STATE/logs"
 PIDS="$STATE/pids"
 
-ALL_SERVICES="embedding question backend frontend"
+ALL_SERVICES="embedding api frontend"
 
 ENV_FILE="$ROOT/.env"
 # Secrets mirrored in GCP Secret Manager (see deploy.sh svc_secret_vars).
@@ -77,23 +78,20 @@ die()  { printf '\n%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 svc_path() {
   case "$1" in
     embedding) echo "$ROOT/apps/embedding" ;;
-    question)  echo "$ROOT/apps/summarization" ;;
-    backend)   echo "$ROOT/apps/backend" ;;
+    api)       echo "$ROOT/apps/api" ;;
     frontend)  echo "$ROOT/apps/web" ;;
     *) return 1 ;;
   esac
 }
 svc_port() {
   case "$1" in
-    embedding) echo 8002 ;; question) echo 8003 ;;
-    backend) echo 8000 ;; frontend) echo 3000 ;; *) return 1 ;;
+    embedding) echo 8002 ;; api) echo 8000 ;; frontend) echo 3000 ;; *) return 1 ;;
   esac
 }
 svc_label() {
   case "$1" in
     embedding) echo "embedding-service (vectors)" ;;
-    question)  echo "question-service (RAG Q&A)" ;;
-    backend)   echo "backend (BFF)" ;;
+    api)       echo "API: auth, user data, chat, RAG" ;;
     frontend)  echo "frontend (React)" ;;
   esac
 }
@@ -102,24 +100,21 @@ svc_label() {
 svc_required() {
   case "$1" in
     embedding) echo "" ;;
-    question)  echo "SUPABASE_URL SUPABASE_KEY ANTHROPIC_API_KEY" ;;
-    backend)   echo "SUPABASE_URL SUPABASE_KEY SUPABASE_JWT_SECRET ANTHROPIC_API_KEY" ;;
+    api)       echo "SUPABASE_URL SUPABASE_KEY SUPABASE_JWT_SECRET ANTHROPIC_API_KEY" ;;
     frontend)  echo "VITE_SUPABASE_URL VITE_SUPABASE_PUBLISHABLE_KEY" ;;
   esac
 }
 svc_start_cmd() {
   case "$1" in
     embedding) echo "venv/bin/uvicorn app.main:app --port 8002" ;;
-    question)  echo "venv/bin/uvicorn question.main:app --port 8003" ;;
-    backend)   echo "venv/bin/uvicorn main:app --port 8000" ;;
+    api)       echo "venv/bin/uvicorn main:app --port 8000" ;;
     frontend)  echo "npm run dev" ;;
   esac
 }
 # libs/ packages each Python service imports (installed editable by setup).
 svc_libs() {
   case "$1" in
-    backend)  echo "common research skills" ;;
-    question) echo "common research skills marketdata" ;;
+    api)      echo "common research skills marketdata" ;;
     *)        echo "" ;;
   esac
 }
@@ -423,7 +418,7 @@ cmd_up() {
   local svcs ordered="" started="" s; svcs="$(resolve_svcs "$@")"
   head1 "STARTING"
   # Dependency order: vectors -> RAG -> BFF -> UI.
-  for s in embedding question backend frontend; do
+  for s in embedding api frontend; do
     case " $svcs " in *" $s "*) ordered="$ordered $s" ;; esac
   done
   for s in $ordered; do start_svc "$s" && started="$started $s" || true; done

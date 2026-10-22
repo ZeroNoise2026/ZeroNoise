@@ -22,11 +22,11 @@ import asyncio
 import logging
 from pathlib import Path
 
-# Resolve the Summarization repo root relative to this file (scripts/ sits
+# Resolve the apps/api root relative to this file (scripts/ sits
 # one level below it) so this works on any machine, not just the author's.
-_SUMMARIZATION_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_SUMMARIZATION_DIR))
-os.chdir(_SUMMARIZATION_DIR)
+_APP_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_APP_DIR))
+os.chdir(_APP_DIR)
 
 # Load .env before any imports that need it
 from dotenv import load_dotenv
@@ -37,7 +37,7 @@ from question.router import router
 from question.retriever import _encode_query, semantic_search, structured_lookup, retrieve
 from question.models import Intent, QueryMode
 from research.data import get_earnings, get_price_snapshots
-from shared.db import get_documents_by_embedding
+from question.db import get_documents_by_embedding
 
 # ── Logging → both console + file ──
 log_path = str(Path(__file__).resolve().parent / "test_retrieval.log")
@@ -417,7 +417,7 @@ async def main():
         return
 
     try:
-        from shared.db import _get_client
+        from question.db import _get_client
         _get_client()
         check("Supabase connection OK", True)
     except Exception as e:

@@ -1,8 +1,8 @@
 """
-shared/db.py
-Supabase queries owned by the question service: tracked-ticker bookkeeping,
+question/db.py
+Supabase queries owned by the question flow: tracked-ticker bookkeeping,
 hot-ticker promotion and vector search. Market-data reads (documents,
-earnings, prices) live in research.data.
+earnings, prices, tracked tickers) live in research.data.
 """
 
 import logging
@@ -14,40 +14,6 @@ from research.data import FIELDS_DOCUMENTS
 
 logger = logging.getLogger(__name__)
 
-
-def get_tracked_tickers(active_only: bool = True) -> list[dict]:
-    """Fetch tracked tickers from Supabase.
-
-    Falls back to a minimal SELECT if optional columns (last_successful_run, etc.)
-    have not been added to the table yet.
-    """
-    client = _get_client()
-    try:
-        query = (
-            client.table("tracked_tickers")
-            .select("ticker, ticker_type, last_news_fetch, last_filing_fetch, last_successful_run")
-            .order("ticker")
-        )
-        if active_only:
-            query = query.eq("is_active", True)
-        return query.execute().data
-    except Exception as e:
-        if "does not exist" in str(e):
-            logger.warning(f"Falling back to minimal tracked_tickers SELECT: {e}")
-            query = (
-                client.table("tracked_tickers")
-                .select("ticker, ticker_type, last_news_fetch, last_filing_fetch")
-                .order("ticker")
-            )
-            if active_only:
-                query = query.eq("is_active", True)
-            return query.execute().data
-        raise
-
-
-# ═══════════════════════════════════════════
-# Question-service specific functions
-# ═══════════════════════════════════════════
 
 def is_tracked(ticker: str) -> bool:
     """Check if a ticker exists in tracked_tickers and is active."""

@@ -1,8 +1,8 @@
 """
 db.py
-Supabase queries owned by the backend: watchlists, preferences, briefings,
-chat sessions. Market-data reads (documents, earnings, prices) live in
-research.data.
+Supabase queries for user data: watchlists, preferences, briefings, chat
+sessions. Market-data reads live in research.data; question-flow
+bookkeeping in question/db.py.
 """
 
 import logging
@@ -192,20 +192,6 @@ def get_briefing_dates(user_id: str, date_from: str, date_to: str) -> list[str]:
         .execute()
     )
     return [row["briefing_date"] for row in (resp.data or [])]
-
-
-# ── Tracked Tickers ───────────────────────────────────────────
-
-def get_tracked_tickers() -> list[dict]:
-    client = get_client()
-    return (
-        client.table("tracked_tickers")
-        .select("ticker, ticker_type")
-        .eq("is_active", True)
-        .order("ticker")
-        .execute()
-        .data
-    )
 
 
 # ── Chat Sessions & Messages ──────────────────────────────────

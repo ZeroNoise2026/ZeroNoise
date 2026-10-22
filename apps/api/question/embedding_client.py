@@ -1,5 +1,5 @@
 """
-shared/http.py
+question/embedding_client.py
 Async HTTP client for the embedding service — created on first use, reused
 globally.
 """

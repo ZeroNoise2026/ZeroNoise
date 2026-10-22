@@ -1,7 +1,7 @@
-"""Smoke test: the backend's /api/chat/stream proxies the upstream `sources`
-event to the client AND persists the items via append_chat_message.
+"""Smoke test: /api/chat/stream forwards the question flow's `sources` event
+to the client AND persists the items via append_chat_message.
 
-Run from apps/backend/:
+Run from apps/api/:
     python -m tests.test_chat_stream_sources
 """
 import os
@@ -9,12 +9,10 @@ import json
 
 os.environ.setdefault("SUPABASE_URL", "http://stub")
 os.environ.setdefault("SUPABASE_KEY", "stub")
-os.environ.setdefault("QUESTION_SERVICE_URL", "http://stub:8003")
 
 from fastapi.testclient import TestClient
 
 import db as db_mod
-import rag as rag_mod
 import main as main_mod
 from auth import get_current_user
 
@@ -43,13 +41,15 @@ def _stub_db():
 
 
 def _stub_upstream_stream(events):
-    """Replace rag.stream_answer_sse with a generator that yields the given
-    SSE-formatted lines. Each event is one SSE 'data: ...\\n\\n' chunk."""
-    def fake_stream(*_a, **_k):
+    """Replace the question flow (main.ask_sse) with an async generator that
+    yields the given SSE-formatted lines, then [DONE]."""
+    async def fake_stream(_req):
         for e in events:
             yield e
         yield "data: [DONE]\n\n"
-    rag_mod.stream_answer_sse = fake_stream
+    main_mod.ask_sse = fake_stream
+    # Keep these tests on the RAG path regardless of the skills setup.
+    main_mod._SKILLS_AVAILABLE = False
 
 
 def test_sources_event_proxied_and_persisted():

@@ -18,15 +18,15 @@ from config import (
 )
 from question.models import Intent, QueryMode, Source
 from common.audit import log_api_call
-from research.data import get_earnings, get_price_snapshots
-from shared.db import get_documents_by_embedding, get_tracked_tickers
+from research.data import get_earnings, get_price_snapshots, get_tracked_tickers
+from question.db import get_documents_by_embedding
 from research.formatters import (
     format_news,
     format_filings,
     format_earnings,
     format_prices,
 )
-from shared.http import get_embedding_client
+from question.embedding_client import get_embedding_client
 
 logger = logging.getLogger(__name__)
 

@@ -10,7 +10,7 @@ import re
 import time
 from pathlib import Path
 
-# Resolve the Summarization repo root relative to this file (scripts/ sits
+# Resolve the apps/api root relative to this file (scripts/ sits
 # one level below it) so this works on any machine, not just the author's.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
