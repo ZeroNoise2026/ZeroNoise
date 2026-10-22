@@ -1,0 +1,23 @@
+# Prefect worker image for data-pipeline flows
+# Runs a prefect worker that pulls work from a Prefect Cloud work pool.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Configure via env:
+#   PREFECT_API_URL       (from Prefect Cloud)
+#   PREFECT_API_KEY       (from Prefect Cloud)
+#   PREFECT_WORK_POOL     e.g. "default-pool"
+ENV PREFECT_WORK_POOL=default-pool
+
+# Worker runs forever; deploy as Cloud Run service with min-instances=1
+CMD ["sh", "-c", "prefect worker start --pool ${PREFECT_WORK_POOL}"]
