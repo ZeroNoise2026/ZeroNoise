@@ -13,11 +13,15 @@
 #   ./dev.sh setup [svc...]  venvs, deps, .env scaffolding
 #   ./dev.sh doctor          what is ready, what is blocked, and why
 #   ./dev.sh test            offline suites (zero credentials)
-#   ./dev.sh eval [args...]  summarizer eval suite (needs MOONSHOT_API_KEY)
+#   ./dev.sh eval [args...]  summarizer eval suite (needs ANTHROPIC_API_KEY)
 #   ./dev.sh up [svc...]     start services whose credentials are present
 #   ./dev.sh down [svc...]   stop them
 #   ./dev.sh status          which services are up
 #   ./dev.sh logs <svc>      tail a service log
+#   ./dev.sh secrets         status of the central secrets file (values masked)
+#   ./dev.sh secrets init    create it from the values already in the .env files
+#   ./dev.sh secrets apply   copy it into every service .env (setup/up/eval do this too)
+#   ./dev.sh secrets pull    refresh it from GCP Secret Manager
 #
 # services: embedding pipeline question backend frontend
 #
@@ -34,8 +38,16 @@
 # resolves via `parents[N]` assuming this shape. Nesting would silently break
 # skills discovery and the Summarization lookups.
 #
+# Secrets
+#   One file holds every shared credential, outside all repos so it can never
+#   be committed: ~/.config/quantagent/secrets.env (override: QUANT_SECRETS_FILE).
+#   Edit only that file. Each service .env is generated from it — `apply`
+#   overwrites only the keys that service's .env already declares.
+#
 # Env
-#   GIT_PROTOCOL=ssh   use git@github.com: instead of https:// for sync
+#   GIT_PROTOCOL=ssh     use git@github.com: instead of https:// for sync
+#   QUANT_SECRETS_FILE   path of the central secrets file
+#   DEPLOY_PROJECT       GCP project for `secrets pull` (default: gcloud config)
 #
 # Written for bash 3.2 (what macOS still ships) — no associative arrays.
 
@@ -50,6 +62,13 @@ PIDS="$STATE/pids"
 GH_ORG="ZeroNoise2026"
 SIBLING_REPOS="Skills Summarization data-pipeline embedding-service"
 ALL_SERVICES="embedding pipeline question backend frontend"
+
+SECRETS_FILE="${QUANT_SECRETS_FILE:-$HOME/.config/quantagent/secrets.env}"
+# Keys the central file owns. The first five are real secrets mirrored in GCP
+# Secret Manager (see deploy.sh svc_secret_vars); the rest are shared config
+# that would otherwise be duplicated across .env files.
+GSM_SECRETS="ANTHROPIC_API_KEY SUPABASE_KEY SUPABASE_JWT_SECRET FINNHUB_API_KEY FMP_API_KEY"
+SHARED_KEYS="$GSM_SECRETS SUPABASE_URL EDGAR_USER_AGENT"
 
 # ─────────────────────────────────────────────────────────────
 # output
@@ -104,8 +123,8 @@ svc_required() {
   case "$1" in
     embedding) echo "" ;;
     pipeline)  echo "SUPABASE_URL SUPABASE_KEY FINNHUB_API_KEY FMP_API_KEY EDGAR_USER_AGENT" ;;
-    question)  echo "SUPABASE_URL SUPABASE_KEY MOONSHOT_API_KEY" ;;
-    backend)   echo "SUPABASE_URL SUPABASE_KEY SUPABASE_JWT_SECRET MOONSHOT_API_KEY" ;;
+    question)  echo "SUPABASE_URL SUPABASE_KEY ANTHROPIC_API_KEY" ;;
+    backend)   echo "SUPABASE_URL SUPABASE_KEY SUPABASE_JWT_SECRET ANTHROPIC_API_KEY" ;;
     frontend)  echo "VITE_SUPABASE_URL VITE_SUPABASE_PUBLISHABLE_KEY" ;;
   esac
 }
@@ -168,6 +187,20 @@ missing_vars() {
 port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 pidfile()   { echo "$PIDS/$1.pid"; }
 running()   { local f; f="$(pidfile "$1")"; [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; }
+
+# Replace KEY=... in an existing .env. awk with ENVIRON, not sed, so values
+# containing / & | or quotes are written verbatim.
+set_env_val() {
+  local file="$1" key="$2" val="$3" tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/devenv.XXXXXX")"
+  KEY="$key" VAL="$val" awk '
+    BEGIN { k = ENVIRON["KEY"]; v = ENVIRON["VAL"] }
+    $0 ~ "^[[:space:]]*" k "[[:space:]]*=" { print k "=" v; next }
+    { print }' "$file" > "$tmp"
+  cat "$tmp" > "$file"; rm -f "$tmp"
+}
+has_env_key() { [ -f "$1" ] && grep -q "^[[:space:]]*$2[[:space:]]*=" "$1"; }
+mask() { local v="$1"; [ "${#v}" -le 8 ] && echo "****" || echo "${v:0:4}…${v: -4}"; }
 validate_svc() { svc_path "$1" >/dev/null 2>&1 || die "unknown service: $1 (have: $ALL_SERVICES)"; }
 resolve_svcs() { if [ "$#" -eq 0 ]; then echo "$ALL_SERVICES"; else for s in "$@"; do validate_svc "$s"; done; echo "$@"; fi; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. $2"; }
@@ -265,6 +298,7 @@ cmd_setup() {
   for s in $svcs; do
     if is_node_svc "$s"; then setup_frontend; else setup_python_svc "$s"; fi
   done
+  secrets_apply
   # Skills is a library, not a service, but its offline suite is the fastest
   # proof the codebase is intact — give it a venv too. Non-fatal on failure.
   if [ -f "$ROOT/Skills/pyproject.toml" ] && [ ! -x "$ROOT/Skills/venv/bin/python" ]; then
@@ -292,6 +326,8 @@ cmd_doctor() {
     else bad "$(printf '%-18s missing -> ./dev.sh sync' "$r")"; fi
   done
 
+  secrets_status
+
   head1 "TOOLCHAIN"
   command -v python3 >/dev/null 2>&1 && ok "python3 $(python3 -V 2>&1 | awk '{print $2}')" || bad "python3 missing"
   command -v node >/dev/null 2>&1 && ok "node $(node -v)" || warn "node missing (frontend only)"
@@ -317,10 +353,10 @@ cmd_doctor() {
 
   head1 "WHAT YOU CAN DO RIGHT NOW"
   info "./dev.sh test    offline suites, zero credentials"
-  if [ -n "$(env_val "$QUANT_DIR/backend/.env" MOONSHOT_API_KEY 2>/dev/null || true)" ]; then
-    info "./dev.sh eval    eval suite (MOONSHOT_API_KEY found)"
+  if [ -n "$(env_val "$QUANT_DIR/backend/.env" ANTHROPIC_API_KEY 2>/dev/null || true)" ]; then
+    info "./dev.sh eval    eval suite (ANTHROPIC_API_KEY found)"
   else
-    warn "./dev.sh eval  blocked: set MOONSHOT_API_KEY in backend/.env"
+    warn "./dev.sh eval  blocked: set ANTHROPIC_API_KEY in backend/.env"
   fi
   if [ "$blocked" -gt 0 ]; then
     printf '\n  %s%s service(s) blocked.%s Supabase keys: Dashboard -> Project Settings -> API.\n' "$C_YEL" "$blocked" "$C_RESET"
@@ -351,10 +387,119 @@ cmd_test() {
 cmd_eval() {
   local dir="$QUANT_DIR/backend"
   [ -x "$dir/venv/bin/python" ] || die "backend venv missing. Run: ./dev.sh setup backend"
-  [ -n "$(env_val "$dir/.env" MOONSHOT_API_KEY 2>/dev/null || true)" ] || die "MOONSHOT_API_KEY is empty in backend/.env"
+  secrets_apply
+  [ -n "$(env_val "$dir/.env" ANTHROPIC_API_KEY 2>/dev/null || true)" ] || die "ANTHROPIC_API_KEY is empty in backend/.env"
   head1 "EVAL SUITE"
   if [ "$#" -eq 0 ]; then ( cd "$dir" && ./venv/bin/python -m evals.run --suite summarizer --n 3 )
   else ( cd "$dir" && ./venv/bin/python -m evals.run "$@" ); fi
+}
+
+# ─────────────────────────────────────────────────────────────
+# secrets
+# ─────────────────────────────────────────────────────────────
+ensure_secrets_file() {
+  [ -f "$SECRETS_FILE" ] && return 0
+  mkdir -p "$(dirname "$SECRETS_FILE")"
+  ( umask 077
+    { echo "# QuantAgent central secrets — the ONLY place to edit credentials."
+      echo "# Copied into each service .env by ./dev.sh secrets apply."
+      for k in $SHARED_KEYS; do echo "$k="; done
+    } > "$SECRETS_FILE" )
+}
+
+# Copy central values into each service .env, only for keys that .env already
+# declares, and only when the central value is real. Quiet when nothing to do.
+secrets_apply() {
+  [ -f "$SECRETS_FILE" ] || return 0
+  local s file k v changed found=0 total=0
+  for s in $ALL_SERVICES; do
+    file="$(svc_envfile "$s")"; [ -f "$file" ] || continue
+    found=$((found + 1)); changed=""
+    for k in $SHARED_KEYS; do
+      v="$(env_val "$SECRETS_FILE" "$k" 2>/dev/null || true)"
+      looks_placeholder "$v" && continue
+      has_env_key "$file" "$k" || continue
+      [ "$(env_val "$file" "$k" 2>/dev/null || true)" = "$v" ] && continue
+      set_env_val "$file" "$k" "$v"; changed="$changed $k"
+    done
+    [ -n "$changed" ] && { ok "$s: updated$changed"; total=$((total + 1)); }
+  done
+  if [ "$found" -eq 0 ]; then info "no service .env files yet — ./dev.sh setup creates them, then re-applies"
+  elif [ "$total" -eq 0 ]; then info "service .env files already match"; fi
+  return 0
+}
+
+# Seed the central file from whatever real values the .env files already
+# hold. Precedence backend > question > pipeline; conflicts are reported by
+# key name only, never by value.
+secrets_init() {
+  ensure_secrets_file
+  local k s file v cur seen from filled=0
+  for k in $SHARED_KEYS; do
+    cur="$(env_val "$SECRETS_FILE" "$k" 2>/dev/null || true)"
+    looks_placeholder "$cur" || continue
+    seen=""; from=""
+    for s in backend question pipeline; do
+      file="$(svc_envfile "$s")"
+      v="$(env_val "$file" "$k" 2>/dev/null || true)"
+      looks_placeholder "$v" && continue
+      if [ -z "$seen" ]; then
+        seen="$v"; from="$s"
+        if has_env_key "$SECRETS_FILE" "$k"; then set_env_val "$SECRETS_FILE" "$k" "$v"
+        else printf '%s=%s\n' "$k" "$v" >> "$SECRETS_FILE"; fi
+        filled=$((filled + 1))
+      elif [ "$v" != "$seen" ]; then
+        warn "$k: the $s .env differs from the $from .env — kept the $from value; check it"
+      fi
+    done
+  done
+  chmod 600 "$SECRETS_FILE"
+  ok "seeded $filled value(s) into $SECRETS_FILE"
+  [ "$filled" -eq 0 ] && info "no existing values found — fill the file in an editor, or ./dev.sh secrets pull"
+  return 0
+}
+
+# Refresh the central file from GCP Secret Manager (latest versions).
+secrets_pull() {
+  need_cmd gcloud "Install the Google Cloud SDK, then: gcloud auth login"
+  local proj k v
+  proj="${DEPLOY_PROJECT:-$(gcloud config get-value project 2>/dev/null || true)}"
+  case "$proj" in ""|"(unset)") die "no GCP project: set DEPLOY_PROJECT or run gcloud config set project <id>" ;; esac
+  ensure_secrets_file
+  for k in $GSM_SECRETS; do
+    if v="$(gcloud secrets versions access latest --secret="$k" --project "$proj" 2>/dev/null)"; then
+      if has_env_key "$SECRETS_FILE" "$k"; then set_env_val "$SECRETS_FILE" "$k" "$v"
+      else printf '%s=%s\n' "$k" "$v" >> "$SECRETS_FILE"; fi
+      ok "$k: pulled"
+    else
+      warn "$k: not in Secret Manager ($proj) or no access — left as is"
+    fi
+  done
+  chmod 600 "$SECRETS_FILE"
+}
+
+secrets_status() {
+  head1 "SECRETS  $SECRETS_FILE"
+  if [ ! -f "$SECRETS_FILE" ]; then
+    warn "missing — run ./dev.sh secrets init (from existing .env files) or ./dev.sh secrets pull"
+    return 0
+  fi
+  local k v
+  for k in $SHARED_KEYS; do
+    v="$(env_val "$SECRETS_FILE" "$k" 2>/dev/null || true)"
+    if looks_placeholder "$v"; then bad "$k: empty"; else ok "$(printf '%-20s %s' "$k" "$(mask "$v")")"; fi
+  done
+}
+
+cmd_secrets() {
+  local sub="${1:-status}"; [ "$#" -gt 0 ] && shift || true
+  case "$sub" in
+    status) secrets_status ;;
+    init)   secrets_init; head1 "APPLY"; secrets_apply ;;
+    apply)  head1 "APPLY"; [ -f "$SECRETS_FILE" ] || die "no $SECRETS_FILE — run ./dev.sh secrets init"; secrets_apply ;;
+    pull)   head1 "PULL"; secrets_pull; head1 "APPLY"; secrets_apply ;;
+    *)      die "unknown: secrets $sub (status|init|apply|pull)" ;;
+  esac
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -412,6 +557,7 @@ wait_healthy() {
 
 cmd_up() {
   local svcs ordered="" started="" s; svcs="$(resolve_svcs "$@")"
+  secrets_apply
   head1 "STARTING"
   # Dependency order: vectors -> RAG -> BFF -> UI.
   for s in embedding pipeline question backend frontend; do
@@ -459,7 +605,7 @@ cmd_logs() {
   tail -f "$LOGS/$1.log"
 }
 
-usage() { sed -n '2,40p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
+usage() { sed -n '2,52p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
 
 main() {
   local cmd="${1:-default}"; [ "$#" -gt 0 ] && shift || true
@@ -474,6 +620,7 @@ main() {
     down|stop)      cmd_down "$@" ;;
     status|ps)      cmd_status ;;
     logs)           cmd_logs "$@" ;;
+    secrets)        cmd_secrets "$@" ;;
     -h|--help|help) usage ;;
     *)              die "unknown command '$cmd' (try ./dev.sh --help)" ;;
   esac

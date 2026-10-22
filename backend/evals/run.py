@@ -6,8 +6,8 @@ CLI runner for the summarizer faithfulness suite.
     cd backend
     python -m evals.run --suite summarizer --n 3
 
-Why n>1: summarizer._call_llm hardcodes temperature=1.0 (kimi-k2.5 accepts
-nothing else), so generation is nondeterministic. A single run is an anecdote.
+Why n>1: current Claude models run at a fixed default temperature (custom
+values are rejected), so generation is nondeterministic. A single run is an anecdote.
 We run each fixture n times and threshold on the aggregate, while keeping every
 raw per-run result in the report — averaging early destroys exactly the
 variance you built the harness to see.
@@ -57,10 +57,10 @@ DEFAULT_MAX_ERROR_RATE = 0.2
 # generate_summary() returns a bare string and throws its `usage` object away
 # in a log line. We are not allowed to edit summarizer.py (and shouldn't want
 # to — evals must not perturb the thing they measure), so instead we wrap the
-# Moonshot client at runtime and record every call it makes. Nothing on disk
+# Claude client at runtime and record every call it makes. Nothing on disk
 # changes; the patch lives and dies inside this process.
 
-class _RecordingCompletions:
+class _RecordingMessages:
     def __init__(self, inner: Any, sink: list[dict[str, Any]]) -> None:
         self._inner = inner
         self._sink = sink
@@ -69,26 +69,21 @@ class _RecordingCompletions:
         t0 = time.time()
         resp = self._inner.create(**kwargs)
         latency_ms = int((time.time() - t0) * 1000)
-        u = getattr(resp, "usage", None)
+        u = resp.usage
         self._sink.append({
             "model": kwargs.get("model"),
-            "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
-            "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
-            "total_tokens": getattr(u, "total_tokens", 0) or 0,
+            "prompt_tokens": u.input_tokens or 0,
+            "completion_tokens": u.output_tokens or 0,
+            "total_tokens": (u.input_tokens or 0) + (u.output_tokens or 0),
             "latency_ms": latency_ms,
         })
         return resp
 
 
-class _RecordingChat:
-    def __init__(self, inner: Any, sink: list[dict[str, Any]]) -> None:
-        self.completions = _RecordingCompletions(inner.completions, sink)
-
-
 class _RecordingClient:
     def __init__(self, inner: Any, sink: list[dict[str, Any]]) -> None:
         self._inner = inner
-        self.chat = _RecordingChat(inner.chat, sink)
+        self.messages = _RecordingMessages(inner.messages, sink)
 
     def __getattr__(self, item: str) -> Any:
         return getattr(self._inner, item)
@@ -369,7 +364,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--suite", default="summarizer", choices=["summarizer"],
                    help="which suite to run (Tier B e2e is not implemented here)")
     p.add_argument("--n", type=int, default=3,
-                   help="runs per fixture; generation is temperature=1.0 so >1 is required")
+                   help="runs per fixture; generation is nondeterministic so >1 is required")
     p.add_argument("--fixtures", type=Path, default=DEFAULT_FIXTURES)
     p.add_argument("--out", type=Path, default=DEFAULT_REPORT)
     p.add_argument("--judge-model", default=DEFAULT_JUDGE_MODEL,

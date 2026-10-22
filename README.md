@@ -24,7 +24,7 @@ flowchart LR
   U["Browser<br/>:3000"] -->|"ask"| B["backend<br/>:8000"]
   B -->|"skill match"| S["Skills"]
   B -->|"otherwise"| Q["question-service<br/>:8003"]
-  S --> L["Moonshot KIMI"]
+  S --> L["Claude<br/>Haiku / Sonnet"]
   Q --> L
   Q --> E["embedding<br/>:8002"]
   Q --> DB[("Supabase<br/>Postgres + pgvector")]
@@ -98,7 +98,7 @@ QuantAgent/
 │   ├── main.py               API server; routes skills before falling back to RAG
 │   ├── rag.py                proxies the question-service SSE stream
 │   ├── briefing.py           scheduled daily briefing generator
-│   ├── summarizer.py         Moonshot client for summaries + briefings
+│   ├── summarizer.py         Claude client for summaries + briefings
 │   ├── fetcher.py            TickerContext assembly from Supabase
 │   ├── db.py                 Supabase data access
 │   ├── auth.py               Supabase JWT verification
@@ -151,14 +151,25 @@ of truth for every table in the project).
 
 ## Credentials
 
-`./dev.sh setup` writes an `.env` per service with the keys listed and the
-values blank. You need:
+Shared credentials live in **one** file outside every repo,
+`~/.config/quantagent/secrets.env` (override with `QUANT_SECRETS_FILE`). Edit
+only that file; `./dev.sh setup`, `up` and `eval` copy its values into each
+service `.env` automatically.
+
+```bash
+./dev.sh secrets init    # first time: seed it from the .env files you already have
+./dev.sh secrets         # what is set (values masked)
+./dev.sh secrets pull    # new machine: rebuild it from GCP Secret Manager
+```
+
+Per-service `.env` files (written by `./dev.sh setup`) still hold
+service-specific config such as model names. The keys each one needs:
 
 | Where | Keys |
 |---|---|
-| `backend/.env` | `SUPABASE_URL` `SUPABASE_KEY` `SUPABASE_JWT_SECRET` `MOONSHOT_API_KEY` |
+| `backend/.env` | `SUPABASE_URL` `SUPABASE_KEY` `SUPABASE_JWT_SECRET` `ANTHROPIC_API_KEY` |
 | `frontend/.env.local` | `VITE_SUPABASE_URL` `VITE_SUPABASE_PUBLISHABLE_KEY` |
-| `../Summarization/.env` | `SUPABASE_URL` `SUPABASE_KEY` `MOONSHOT_API_KEY` |
+| `../Summarization/.env` | `SUPABASE_URL` `SUPABASE_KEY` `ANTHROPIC_API_KEY` |
 | `../data-pipeline/.env` | `SUPABASE_URL` `SUPABASE_KEY` `FINNHUB_API_KEY` `FMP_API_KEY` `EDGAR_USER_AGENT` |
 | `../embedding-service/.env` | none required |
 
@@ -180,7 +191,7 @@ structural checks first, then a claim-level LLM judge for faithfulness.
 ./dev.sh eval --no-judge      # structural checks only — free and instant
 ```
 
-It needs only `MOONSHOT_API_KEY` — no Supabase, no running services. See
+It needs only `ANTHROPIC_API_KEY` — no Supabase, no running services. See
 [`backend/evals/README.md`](backend/evals/README.md) for what is measured, the
 thresholds, and the design notes.
 
@@ -199,7 +210,7 @@ Without that line, skill routing silently degrades to RAG on every request.
 ./dev.sh setup [svc...]  # venvs, deps, .env scaffolding
 ./dev.sh doctor          # what is ready, what is blocked, and why
 ./dev.sh test            # offline suites — zero credentials needed
-./dev.sh eval            # summarizer eval suite (needs MOONSHOT_API_KEY)
+./dev.sh eval            # summarizer eval suite (needs ANTHROPIC_API_KEY)
 ./dev.sh up [svc...]     # start services; refuses any with missing credentials
 ./dev.sh down / status / logs <svc>
 ```

@@ -4,12 +4,12 @@
 
 ```bash
 cd backend                       # summarizer/config are top-level modules here
-export MOONSHOT_API_KEY=...      # or put it in backend/.env
+export ANTHROPIC_API_KEY=...     # or put it in backend/.env
 python -m evals.run --suite summarizer --n 3
 ```
 
 Useful flags: `--no-judge` (structural only, free and instant) · `--fixture-id FX2_missing_earnings` ·
-`--judge-model moonshot-v1-128k` · `--judge-votes 3` · `--always-judge` · `--out path.json`
+`--judge-model claude-opus-5-5` · `--judge-votes 3` · `--always-judge` · `--out path.json`
 
 ## What is measured
 
@@ -50,9 +50,9 @@ context is `unsupported`. That's what makes this a *faithfulness* measure rather
 majority. Ties resolve to the *less* severe verdict — one flaky vote shouldn't fail a build, since a single
 `contradicted` sinks a whole fixture.
 
-**Self-grading bias.** Generator and judge are both Moonshot. The runner defaults the judge to a different
-model than the generator (`moonshot-v1-32k` vs. the `moonshot-v1-8k` that `_pick_model` selects for these
-small fixtures) and prints a warning if they ever coincide — but same-provider self-preference bias remains.
+**Self-grading bias.** Generator and judge are both Claude. The runner defaults the judge to a different,
+stronger model than the generator (`claude-sonnet-5-5` vs. the `claude-haiku-5-5` that `LLM_MODEL` selects)
+and prints a warning if they ever coincide — but same-provider self-preference bias remains.
 The real fix is a second provider's key; treat the absolute numbers as soft and the run-over-run *deltas*
 as the signal.
 
@@ -64,7 +64,7 @@ false positives are auditable rather than mysterious.
 
 **Token counts without touching `summarizer.py`.** `generate_summary()` returns a bare string and drops its
 `usage` object into a log line. Rather than edit it — evals shouldn't perturb what they measure — the runner
-wraps the Moonshot client at runtime and records every completion. Nothing on disk changes.
+wraps the Claude client at runtime and records every completion. Nothing on disk changes.
 
 **FX3 — faithfulness ≠ correctness.** FX3's context is *internally inconsistent*: `news_text` and
 `earnings_text` state different revenue figures for the same quarter. A summary echoing the wrong one is

@@ -9,9 +9,10 @@ SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 # Found in Dashboard → Project Settings → API → JWT Settings → JWT Secret.
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 
-MOONSHOT_API_KEY = os.getenv("MOONSHOT_API_KEY")
-MOONSHOT_BASE_URL = os.getenv("MOONSHOT_BASE_URL", "https://api.moonshot.ai/v1")
-MOONSHOT_MODEL = os.getenv("MOONSHOT_MODEL", "kimi-k2.5")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+LLM_MODEL = os.getenv("LLM_MODEL", "claude-haiku-5-5")
+# "low" | "medium" | "high" — thinking depth for summaries and briefings
+LLM_EFFORT = os.getenv("LLM_EFFORT", "medium")
 
 EMBEDDING_SERVICE_URL = os.getenv("EMBEDDING_SERVICE_URL", "http://localhost:8002")
 QUESTION_SERVICE_URL = os.getenv("QUESTION_SERVICE_URL", "http://localhost:8003")

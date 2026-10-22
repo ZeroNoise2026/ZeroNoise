@@ -47,14 +47,14 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-# The judge deliberately reuses the generator's Moonshot client object rather
+# The judge deliberately reuses the generator's Claude client object rather
 # than constructing a fourth copy of it in this repo. Only the *model* differs.
 import summarizer
 
 # Default judge model. Must not be the same model that generated the summary
-# (summarizer._pick_model picks by prompt size; for these fixtures that is
-# moonshot-v1-8k). Override with EVAL_JUDGE_MODEL or --judge-model.
-DEFAULT_JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "moonshot-v1-32k")
+# (summarizer uses LLM_MODEL, claude-haiku-5-5 by default), and should be at
+# least as capable. Override with EVAL_JUDGE_MODEL or --judge-model.
+DEFAULT_JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "claude-sonnet-5-5")
 
 VALID_VERDICTS = {"supported", "unsupported", "contradicted"}
 
@@ -138,13 +138,6 @@ def _strip_fence(raw: str) -> str:
     return m.group(1) if m else (raw or "").strip()
 
 
-def _temperature_for(model: str) -> float:
-    # kimi-k2.5 only accepts temperature=1 (see summarizer._call_llm).
-    # Every moonshot-v1-* tier accepts 0, which is one concrete reason to
-    # prefer them for judging: a deterministic judge is a better ruler.
-    return 1.0 if "kimi" in (model or "").lower() else 0.0
-
-
 def _call_json(
     client: Any,
     model: str,
@@ -159,27 +152,29 @@ def _call_json(
     """
     t0 = time.time()
     try:
-        resp = client.chat.completions.create(
+        # Current Claude models reject non-default temperature, so the judge is
+        # not deterministic — use --judge-votes to smooth it. Low effort keeps
+        # the judge cheap; max_tokens leaves headroom for thinking.
+        resp = client.messages.create(
             model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=_temperature_for(model),
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
+            max_tokens=max_tokens + 4000,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+            output_config={"effort": "low"},
         )
     except Exception as e:  # API-level failure is also a judge failure
         raise JudgeError(f"judge API call failed: {type(e).__name__}: {e}") from e
 
     latency_ms = int((time.time() - t0) * 1000)
-    raw = (resp.choices[0].message.content or "").strip()
+    if resp.stop_reason == "refusal":
+        raise JudgeError(f"judge model {model} declined the request (stop_reason=refusal)")
+    raw = "".join(b.text for b in resp.content if b.type == "text").strip()
 
-    u = getattr(resp, "usage", None)
+    u = resp.usage
     usage = {
-        "prompt_tokens": getattr(u, "prompt_tokens", 0) or 0,
-        "completion_tokens": getattr(u, "completion_tokens", 0) or 0,
-        "total_tokens": getattr(u, "total_tokens", 0) or 0,
+        "prompt_tokens": u.input_tokens or 0,
+        "completion_tokens": u.output_tokens or 0,
+        "total_tokens": (u.input_tokens or 0) + (u.output_tokens or 0),
     }
 
     try:
@@ -367,8 +362,8 @@ def judge_summary(
         fixture: raw fixture record (`_trap` is never read).
         model: judge model. Defaults to EVAL_JUDGE_MODEL, then
             DEFAULT_JUDGE_MODEL. Must differ from the generator's model.
-        client: OpenAI-compatible client. Defaults to the generator's Moonshot
-            client (same endpoint, different model). Injectable for testing.
+        client: Anthropic client. Defaults to the generator's Claude client
+            (same endpoint, different model). Injectable for testing.
         votes: run stage 2 this many times and take a per-claim majority.
         retries: extra attempts on a JSON parse failure. 1 = try twice total.
     """

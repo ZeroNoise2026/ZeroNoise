@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 supabase
 python-dotenv
-openai
+anthropic>=2.1.0
 requests
 pydantic
 pyjwt[crypto]>=2.8

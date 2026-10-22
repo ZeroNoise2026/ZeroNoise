@@ -1,31 +1,18 @@
 """
 summarizer.py
-Moonshot API client for on-demand summarization and daily briefing generation.
+Claude API client for on-demand summarization and daily briefing generation.
 """
 
 import logging
-from openai import OpenAI, RateLimitError, APITimeoutError, APIConnectionError
 import time
-from config import MOONSHOT_API_KEY, MOONSHOT_BASE_URL
+
+import anthropic
+
+from config import ANTHROPIC_API_KEY, LLM_MODEL, LLM_EFFORT
 from fetcher import TickerContext
 
 logger = logging.getLogger(__name__)
 _client = None
-
-# ── Dynamic model selection (same logic as Summarization/shared/llm.py) ──
-_MODEL_TIERS = [
-    ("moonshot-v1-8k",   8_000 * 4 * 0.8),
-    ("moonshot-v1-32k",  32_000 * 4 * 0.8),
-    ("moonshot-v1-128k", 128_000 * 4 * 0.8),
-    ("kimi-k2.5",        float("inf")),
-]
-
-
-def _pick_model(prompt_chars: int) -> str:
-    for model, max_chars in _MODEL_TIERS:
-        if prompt_chars <= max_chars:
-            return model
-    return _MODEL_TIERS[-1][0]
 
 SUMMARY_SYSTEM_PROMPT = """You are a senior financial analyst skilled at synthesizing multi-source financial data into concise investment summaries.
 
@@ -55,45 +42,45 @@ Requirements:
 5. If no meaningful data exists for a ticker, note it briefly and move on"""
 
 
-def _get_client() -> OpenAI:
+def _get_client() -> anthropic.Anthropic:
     global _client
     if _client is None:
-        if not MOONSHOT_API_KEY:
-            raise ValueError("MOONSHOT_API_KEY is not set")
-        _client = OpenAI(api_key=MOONSHOT_API_KEY, base_url=MOONSHOT_BASE_URL)
+        if not ANTHROPIC_API_KEY:
+            raise ValueError("ANTHROPIC_API_KEY is not set")
+        # Retries are handled in _call_llm; disable SDK retries to avoid compounding.
+        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, max_retries=0)
     return _client
 
 
 def _call_llm(system_prompt: str, user_prompt: str, max_retries: int = 3) -> str:
     client = _get_client()
     total_chars = len(system_prompt) + len(user_prompt)
-    model = _pick_model(total_chars)
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt},
-    ]
-
-    # kimi-k2.5 only accepts temperature=1
-    temperature = 1.0
+    model = LLM_MODEL
 
     logger.info(f"  LLM call: model={model}, prompt ~{total_chars:,} chars")
 
     for attempt in range(1, max_retries + 1):
         try:
-            response = client.chat.completions.create(
+            # Current Claude models reject non-default temperature; effort is the
+            # depth knob. max_tokens includes thinking tokens.
+            response = client.messages.create(
                 model=model,
-                messages=messages,
-                temperature=temperature,
+                max_tokens=16000,
+                system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
+                messages=[{"role": "user", "content": user_prompt}],
+                output_config={"effort": LLM_EFFORT},
             )
             usage = response.usage
-            logger.info(f"  LLM done: model={model}, prompt={usage.prompt_tokens}, completion={usage.completion_tokens}")
-            return response.choices[0].message.content
+            logger.info(f"  LLM done: model={model}, prompt={usage.input_tokens}, completion={usage.output_tokens}")
+            if response.stop_reason == "refusal":
+                raise RuntimeError(f"{model} declined the request (stop_reason=refusal)")
+            return "".join(b.text for b in response.content if b.type == "text")
 
-        except RateLimitError as e:
+        except anthropic.RateLimitError as e:
             wait = min(2 ** attempt * 10, 60)
             logger.warning(f"  Rate limited (attempt {attempt}/{max_retries}), waiting {wait}s: {e}")
             time.sleep(wait)
-        except (APITimeoutError, APIConnectionError) as e:
+        except (anthropic.APITimeoutError, anthropic.APIConnectionError, anthropic.InternalServerError) as e:
             wait = 2 ** attempt * 5
             logger.warning(f"  Connection issue (attempt {attempt}/{max_retries}), retrying in {wait}s: {e}")
             time.sleep(wait)
