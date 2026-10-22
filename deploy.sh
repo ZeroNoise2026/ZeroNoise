@@ -19,7 +19,7 @@
 #   ./deploy.sh cors <origin>       point the backend's CORS at your Vercel domain
 #   ./deploy.sh frontend            what to run on the Vercel side
 #
-# cloud services: embedding question backend pipeline
+# cloud services: embedding question backend
 #   (frontend lives on Vercel — see `./deploy.sh frontend`)
 #
 # Config, in order of precedence: environment > .deployrc > gcloud defaults
@@ -41,8 +41,8 @@ RC_FILE="$ROOT/.deployrc"
 
 REGION="${DEPLOY_REGION:-us-central1}"
 AR_REPO="${AR_REPO:-quantagent}"
-CLOUD_SERVICES="embedding question backend"      # pipeline is opt-in, see below
-ALL_CLOUD_SERVICES="embedding pipeline question backend"
+CLOUD_SERVICES="embedding question backend"
+ALL_CLOUD_SERVICES="$CLOUD_SERVICES"
 
 # ─────────────────────────────────────────────────────────────
 # output  (same vocabulary as dev.sh, on purpose)
@@ -67,7 +67,6 @@ die()   { printf '\n%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 svc_dir() {
   case "$1" in
     embedding) echo "$ROOT/apps/embedding" ;;
-    pipeline)  echo "$ROOT/apps/pipeline" ;;
     question)  echo "$ROOT/apps/summarization" ;;
     backend)   echo "$ROOT/apps/backend" ;;
     *) return 1 ;;
@@ -86,7 +85,6 @@ svc_context() {
 svc_dockerfile() {
   case "$1" in
     embedding) echo "Dockerfile" ;;
-    pipeline)  echo "Dockerfile.api" ;;
     question)  echo "apps/summarization/Dockerfile.question" ;;   # relative to svc_context
     backend)   echo "apps/backend/Dockerfile" ;;   # relative to svc_context
   esac
@@ -96,7 +94,6 @@ svc_sa_id()    { echo "qa-$1"; }
 svc_label() {
   case "$1" in
     embedding) echo "embedding-service (vectors)" ;;
-    pipeline)  echo "data-pipeline API (live lookups)" ;;
     question)  echo "question-service (RAG Q&A)" ;;
     backend)   echo "backend (BFF)" ;;
   esac
@@ -106,7 +103,7 @@ svc_secret_vars() {
   case "$1" in
     embedding) echo "" ;;
     pipeline)  echo "SUPABASE_KEY FINNHUB_API_KEY FMP_API_KEY" ;;
-    question)  echo "SUPABASE_KEY ANTHROPIC_API_KEY" ;;
+    question)  echo "SUPABASE_KEY ANTHROPIC_API_KEY FINNHUB_API_KEY FMP_API_KEY" ;;
     backend)   echo "SUPABASE_KEY SUPABASE_JWT_SECRET ANTHROPIC_API_KEY" ;;
   esac
 }
@@ -125,7 +122,7 @@ svc_wired_vars() {
   case "$1" in
     embedding) echo "" ;;
     pipeline)  echo "EMBEDDING_SERVICE_URL" ;;
-    question)  echo "EMBEDDING_SERVICE_URL DATA_PIPELINE_URL" ;;
+    question)  echo "EMBEDDING_SERVICE_URL" ;;
     backend)   echo "EMBEDDING_SERVICE_URL QUESTION_SERVICE_URL" ;;
   esac
 }
@@ -210,7 +207,6 @@ live_url() {
 url_var_for() {
   case "$1" in
     EMBEDDING_SERVICE_URL) echo "embedding" ;;
-    DATA_PIPELINE_URL)     echo "pipeline" ;;
     QUESTION_SERVICE_URL)  echo "question" ;;
   esac
 }
@@ -497,7 +493,7 @@ cmd_deploy() {
   local svcs ordered="" s; svcs="$(resolve_svcs "$@")"
   # Dependency order: vectors -> live lookups -> RAG -> BFF. Each step resolves
   # the URLs of everything before it, so wiring is never hand-copied.
-  for s in embedding pipeline question backend; do
+  for s in embedding question backend; do
     case " $svcs " in *" $s "*) ordered="$ordered $s" ;; esac
   done
   head1 "DEPLOY  ($(project_id) / $REGION)"

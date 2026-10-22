@@ -13,10 +13,12 @@ Free tier actually available endpoints (verified):
 Note: For PE/market cap, use Finnhub get_basic_financials() instead (free, fields: peBasicExclExtraTTM / marketCapitalization).
 """
 
+import os
 from typing import Optional, List
+
 import requests
-from pipeline.config import FMP_API_KEY
-from pipeline.utils.retry import with_retry
+
+from marketdata.retry import with_retry
 
 
 class FMPClient:
@@ -24,7 +26,7 @@ class FMPClient:
     BASE_URL = "https://financialmodelingprep.com/stable"
 
     def __init__(self):
-        self.api_key = FMP_API_KEY
+        self.api_key = os.getenv("FMP_API_KEY", "")
         # Reuse Session: reduce TCP handshake overhead, consistent with EdgarClient
         self.session = requests.Session()
 

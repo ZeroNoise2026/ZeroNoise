@@ -7,8 +7,9 @@ WORKDIR /app
 
 COPY libs/common /libs/common
 COPY libs/research /libs/research
+COPY libs/marketdata /libs/marketdata
 COPY apps/summarization/requirements.txt .
-RUN pip install --no-cache-dir /libs/common /libs/research -r requirements.txt
+RUN pip install --no-cache-dir /libs/common /libs/research /libs/marketdata -r requirements.txt
 
 COPY apps/summarization/config.py .
 COPY apps/summarization/shared/ shared/

@@ -51,9 +51,9 @@ from pipeline.store import (
     update_ticker_timestamps,
 )
 from pipeline.config import EMBEDDING_SERVICE_URL, FILING_REFRESH_DAYS, EDGAR_FACTS_MAX_MB, EMBED_BATCH
-from pipeline.clients.finnhub_client import FinnhubClient
-from pipeline.clients.edgar_client import EdgarClient
-from pipeline.clients.fmp_client import FMPClient
+from marketdata.edgar import EdgarClient
+from marketdata.finnhub import FinnhubClient
+from marketdata.fmp import FMPClient
 
 logger = logging.getLogger(__name__)
 

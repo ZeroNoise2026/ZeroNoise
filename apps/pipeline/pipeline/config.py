@@ -13,16 +13,8 @@ from dotenv import load_dotenv
 # variables (Cloud Run) win; in a container there is no file and this is a no-op.
 load_dotenv(next((d / ".env" for d in Path(__file__).resolve().parents if (d / ".env").is_file()), None))
 
-# ── API Keys ──────────────────────────────────────────────────────────────────
-
-# Finnhub API Key — for news, earnings, financial metrics; free 60 req/min
-FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
-
-# FMP API Key — for real-time quotes, valuation metrics; free 250 req/day (use sparingly)
-FMP_API_KEY = os.getenv("FMP_API_KEY", "")
-
-# SEC EDGAR User-Agent — format: "Name Email", SEC requires real contact info, no registration needed
-EDGAR_USER_AGENT = os.getenv("EDGAR_USER_AGENT", "QuantAgent dev@quantagent.com")
+# Finnhub / FMP / EDGAR credentials are read by libs/marketdata from the
+# environment (FINNHUB_API_KEY, FMP_API_KEY, EDGAR_USER_AGENT).
 
 # ── Upstream service URLs ─────────────────────────────────────────────────────
 

@@ -1,9 +1,9 @@
 """
-app/utils/retry.py
+marketdata/retry.py
 Exponential backoff retry decorator — handles upstream API transient failures (rate limits/server errors/network issues).
 
 Usage:
-    from pipeline.utils.retry import with_retry
+    from marketdata.retry import with_retry
 
     @with_retry(max_retries=3, base_delay=1.0)
     def call_upstream(ticker: str):

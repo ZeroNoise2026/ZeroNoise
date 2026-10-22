@@ -4,16 +4,18 @@ Wraps the Finnhub official Python SDK, providing news, earnings, and financial m
 Free tier limit: 60 req/min, returns 429 when exceeded.
 """
 
-import finnhub
+import os
 from datetime import datetime, timedelta
-from pipeline.config import FINNHUB_API_KEY
-from pipeline.utils.retry import with_retry
+
+import finnhub
+
+from marketdata.retry import with_retry
 
 
 class FinnhubClient:
     def __init__(self):
         # Initialize using the official SDK, which manages HTTP connections internally
-        self.client = finnhub.Client(api_key=FINNHUB_API_KEY)
+        self.client = finnhub.Client(api_key=os.getenv("FINNHUB_API_KEY", ""))
 
     @with_retry()
     def get_company_news(self, ticker: str, days_back: int = 7) -> list[dict]:

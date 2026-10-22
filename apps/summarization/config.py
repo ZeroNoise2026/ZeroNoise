@@ -42,7 +42,6 @@ LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "16000"))
 # 3. Upstream service URLs
 # ═══════════════════════════════════════════
 EMBEDDING_SERVICE_URL: str = os.getenv("EMBEDDING_SERVICE_URL", "http://localhost:8002")
-DATA_PIPELINE_URL: str = os.getenv("DATA_PIPELINE_URL", "http://localhost:8001")
 
 # ═══════════════════════════════════════════
 # 4. Vector search parameters

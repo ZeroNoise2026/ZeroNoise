@@ -4,11 +4,13 @@ Directly calls SEC official REST API (no API Key needed), provides filing docume
 Rate limit: <= 10 req/s, sleep(0.1) before each request to stay within limits.
 """
 
+import os
 import time
-import requests
 from typing import Optional
-from pipeline.config import EDGAR_USER_AGENT
-from pipeline.utils.retry import with_retry
+
+import requests
+
+from marketdata.retry import with_retry
 
 
 class EdgarClient:
@@ -17,7 +19,7 @@ class EdgarClient:
         self.session = requests.Session()
         self.session.headers.update({
             # SEC requires: format "Name Email", for contacting developers about abusive requests
-            "User-Agent": EDGAR_USER_AGENT,
+            "User-Agent": os.getenv("EDGAR_USER_AGENT", "zeroNoise dev@zeronoise.dev"),
             "Accept-Encoding": "gzip, deflate",
         })
         # ticker→CIK mapping table, lazy-loaded and cached on first call, only one request per service lifetime

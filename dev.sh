@@ -18,14 +18,14 @@
 #   ./dev.sh env             which keys in .env are set (values masked)
 #   ./dev.sh env pull        fill .env's secrets from GCP Secret Manager
 #
-# services: embedding pipeline question backend frontend
+# services: embedding question backend frontend
 #
 # Layout
 #
 #   apps/backend        FastAPI BFF                       (service: backend)
 #   apps/web            React frontend                    (service: frontend)
 #   apps/summarization  question service + summary CLI    (service: question)
-#   apps/pipeline       ingestion + live-lookup API       (service: pipeline)
+#   apps/pipeline       batch ingestion (a job, not a service)
 #   apps/embedding      embedding API                     (service: embedding)
 #   libs/common         Claude client, Supabase client, audit log
 #   libs/research       ticker context, report generation + cache
@@ -48,7 +48,7 @@ STATE="$ROOT/.devstack"
 LOGS="$STATE/logs"
 PIDS="$STATE/pids"
 
-ALL_SERVICES="embedding pipeline question backend frontend"
+ALL_SERVICES="embedding question backend frontend"
 
 ENV_FILE="$ROOT/.env"
 # Secrets mirrored in GCP Secret Manager (see deploy.sh svc_secret_vars).
@@ -77,7 +77,6 @@ die()  { printf '\n%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 svc_path() {
   case "$1" in
     embedding) echo "$ROOT/apps/embedding" ;;
-    pipeline)  echo "$ROOT/apps/pipeline" ;;
     question)  echo "$ROOT/apps/summarization" ;;
     backend)   echo "$ROOT/apps/backend" ;;
     frontend)  echo "$ROOT/apps/web" ;;
@@ -86,14 +85,13 @@ svc_path() {
 }
 svc_port() {
   case "$1" in
-    embedding) echo 8002 ;; pipeline) echo 8001 ;; question) echo 8003 ;;
+    embedding) echo 8002 ;; question) echo 8003 ;;
     backend) echo 8000 ;; frontend) echo 3000 ;; *) return 1 ;;
   esac
 }
 svc_label() {
   case "$1" in
     embedding) echo "embedding-service (vectors)" ;;
-    pipeline)  echo "data-pipeline API (live lookups)" ;;
     question)  echo "question-service (RAG Q&A)" ;;
     backend)   echo "backend (BFF)" ;;
     frontend)  echo "frontend (React)" ;;
@@ -104,7 +102,6 @@ svc_label() {
 svc_required() {
   case "$1" in
     embedding) echo "" ;;
-    pipeline)  echo "SUPABASE_URL SUPABASE_KEY FINNHUB_API_KEY FMP_API_KEY EDGAR_USER_AGENT" ;;
     question)  echo "SUPABASE_URL SUPABASE_KEY ANTHROPIC_API_KEY" ;;
     backend)   echo "SUPABASE_URL SUPABASE_KEY SUPABASE_JWT_SECRET ANTHROPIC_API_KEY" ;;
     frontend)  echo "VITE_SUPABASE_URL VITE_SUPABASE_PUBLISHABLE_KEY" ;;
@@ -113,7 +110,6 @@ svc_required() {
 svc_start_cmd() {
   case "$1" in
     embedding) echo "venv/bin/uvicorn app.main:app --port 8002" ;;
-    pipeline)  echo "venv/bin/uvicorn pipeline.api:app --port 8001" ;;
     question)  echo "venv/bin/uvicorn question.main:app --port 8003" ;;
     backend)   echo "venv/bin/uvicorn main:app --port 8000" ;;
     frontend)  echo "npm run dev" ;;
@@ -123,7 +119,7 @@ svc_start_cmd() {
 svc_libs() {
   case "$1" in
     backend)  echo "common research skills" ;;
-    question) echo "common research skills" ;;
+    question) echo "common research skills marketdata" ;;
     *)        echo "" ;;
   esac
 }
@@ -259,7 +255,7 @@ cmd_setup() {
   if [ ! -x "$lv/bin/python" ]; then
     if python3 -m venv "$lv" \
        && "$lv/bin/python" -m pip install --quiet --upgrade pip >/dev/null \
-       && "$lv/bin/python" -m pip install --quiet -e "$ROOT/libs/common" -e "$ROOT/libs/research" -e "$ROOT/libs/skills"; then
+       && "$lv/bin/python" -m pip install --quiet -e "$ROOT/libs/common" -e "$ROOT/libs/research" -e "$ROOT/libs/skills" -e "$ROOT/libs/marketdata"; then
       ok "libs: venv ready (editable install)"
     else
       warn "libs: editable install failed — ./dev.sh test will skip the libs suites"
@@ -427,7 +423,7 @@ cmd_up() {
   local svcs ordered="" started="" s; svcs="$(resolve_svcs "$@")"
   head1 "STARTING"
   # Dependency order: vectors -> RAG -> BFF -> UI.
-  for s in embedding pipeline question backend frontend; do
+  for s in embedding question backend frontend; do
     case " $svcs " in *" $s "*) ordered="$ordered $s" ;; esac
   done
   for s in $ordered; do start_svc "$s" && started="$started $s" || true; done
