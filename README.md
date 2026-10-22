@@ -57,7 +57,7 @@ Summarization/
 │   ├── retriever.py           pgvector search + recency rerank + query expansion
 │   ├── live_fetcher.py        real-time quote fallback
 │   ├── kimi_structured.py     JSON-schema-constrained LLM calls
-│   ├── tier2_cache.py         in-process LRU for untracked tickers
+│   ├── tier2_cache.py         in-process LRU for untracked tickers (hot-ticker promotion counts in Postgres: scripts/setup_ticker_queries.sql)
 │   ├── generator.py           free-form answer path
 │   ├── schemas/               per-intent JSON Schema + templates
 │   └── templates/             sandboxed Jinja2 engine, filters, functions

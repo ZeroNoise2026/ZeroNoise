@@ -109,11 +109,11 @@ def test_path_b_emits_doc_sources_after_llm_stream():
     orch.router.route = lambda *_a, **_k: _route(
         Intent.NEWS_SUMMARY, ["AAPL"], mode=QueryMode.SEMANTIC,
     )
-    # Make is_tracked say AAPL is tier1 so retrieve() runs.
+    # Make is_ingested say AAPL is tier1 so retrieve() runs.
     # Stub at the orchestrator namespace where it was imported (avoids
     # touching shared.db which lazily creates a real Supabase client and
     # blows up under sandbox proxies).
-    orch.is_tracked = lambda t: True
+    orch.is_ingested = lambda t: True
 
     fake_sources = [
         Source(
