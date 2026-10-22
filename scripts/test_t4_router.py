@@ -184,7 +184,7 @@ for t in TESTS:
             print(f"│    {intent.value:20s}  score={info['score']}  priority={info['priority']}  matched=[{kws}]{winner}")
     all_zero = all(info["score"] == 0 for info in tr["intent_scores"].values())
     if all_zero:
-        print(f"│    (all scores = 0 → fallback to GENERAL_ANALYSIS, L2 KIMI TODO)")
+        print(f"│    (all scores = 0 → fallback to GENERAL_ANALYSIS, L2 LLM TODO)")
     print(f"│    → Intent: {result.intent.value}")
     print(f"│")
     print(f"│  Step 3: Map Intent → QueryMode")

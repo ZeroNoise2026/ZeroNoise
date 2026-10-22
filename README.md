@@ -8,7 +8,7 @@ Two co-located services sharing one data layer and one LLM client.
 
 | Service | Form | Purpose |
 |---|---|---|
-| **summary** | CLI / scheduled job | Generates a Markdown research report per ticker from Supabase + Moonshot. Caches by input hash, so unchanged inputs reuse the previous report. |
+| **summary** | CLI / scheduled job | Generates a Markdown research report per ticker from Supabase + Claude. Caches by input hash, so unchanged inputs reuse the previous report. |
 | **question** | FastAPI service (:8003) | RAG-based ad-hoc Q&A: structured-output intents (earnings, comparison, price) plus a templated rendering layer that keeps numbers deterministic and lets the LLM write only the prose. |
 
 > **For PMs / analysts:** this is where the deep analysis lives. `summary` is the
@@ -29,11 +29,11 @@ Two co-located services sharing one data layer and one LLM client.
    summary/                                        question/
    ┌──────────────────────┐                  ┌──────────────────────┐
    │ fetcher → prompts →  │                  │ FastAPI :8003        │
-   │ summarizer (Moonshot)│                  │  /api/ask/stream     │
+   │ summarizer (Claude)  │                  │  /api/ask/stream     │
    │ → cache → output/    │                  │ router → orchestrator│
    └──────────────────────┘                  │   ├─ retriever (RAG) │
                                              │   ├─ live_fetcher    │
-                                             │   ├─ kimi_structured │
+                                             │   ├─ structured      │
                                              │   └─ templates/      │
                                              └──────────────────────┘
 ```
@@ -47,17 +47,17 @@ Summarization/
 │   ├── run.py                 CLI entry (python -m summary.run)
 │   ├── fetcher.py             assemble TickerContext from Supabase
 │   ├── prompts.py             SYSTEM_PROMPT, build_user_prompt, PROMPT_VERSION
-│   ├── summarizer.py          Moonshot call wrapper
+│   ├── summarizer.py          Claude call wrapper
 │   ├── cache.py               summary_cache integration (input_hash)
 │   └── cleanup.py             retention sweep
 ├── question/                  ── online Q&A service ──
 │   ├── main.py                FastAPI app (:8003)
 │   ├── orchestrator.py        per-request flow
-│   ├── router.py              L1 keyword → L2 Kimi intent classification
+│   ├── router.py              L1 keyword → L2 LLM intent classification
 │   ├── retriever.py           pgvector search + recency rerank + query expansion
 │   ├── live_fetcher.py        real-time quote fallback
-│   ├── kimi_structured.py     JSON-schema-constrained LLM calls
-│   ├── tier2_cache.py         in-process LRU for untracked tickers
+│   ├── structured.py          JSON-schema-constrained LLM calls
+│   ├── tier2_cache.py         in-process LRU for untracked tickers (hot-ticker promotion counts in Postgres: scripts/setup_ticker_queries.sql)
 │   ├── generator.py           free-form answer path
 │   ├── schemas/               per-intent JSON Schema + templates
 │   └── templates/             sandboxed Jinja2 engine, filters, functions
@@ -79,7 +79,7 @@ cp .env.example .env        # then fill in credentials
 
 Prerequisites: Python 3.11+, a Supabase project with
 `../data-pipeline/pipeline/schema.sql` applied and `pgvector` enabled, a
-Moonshot API key, and a reachable embedding-service on :8002.
+Anthropic API key, and a reachable embedding-service on :8002.
 
 ## summary — CLI
 
@@ -121,19 +121,19 @@ Consumed by `QuantAgent/backend/rag.py`.
    and filings truncate first; earnings and price stay intact.
 3. **Cache check** — `compute_input_hash` over source doc ids + model + prompt
    version. Hit → reuse.
-4. **Prompt → generate → save** — Moonshot with retry, then `output/` and
+4. **Prompt → generate → save** — Claude with retry, then `output/` and
    `summary_cache`.
 
 ## Data flow — question
 
 1. **Route** — `router.classify()` picks an intent (`EARNINGS_ANALYSIS`,
    `COMPARISON`, `PRICE_QUERY`, `NEWS_SUMMARY`, …). L1 is keyword + regex and
-   free; L2 is a small Kimi call, used only when L1 misses or when the query
+   free; L2 is a small Haiku call, used only when L1 misses or when the query
    also warrants expansion.
 2. **Retrieve** — encode via embedding-service, pgvector search with
    recency-aware reranking and optional multi-vector query expansion.
 3. **Structured generation** — for `EARNINGS_ANALYSIS` / `COMPARISON` /
-   `PRICE_QUERY`, build context deterministically from DB rows, ask Moonshot for
+   `PRICE_QUERY`, build context deterministically from DB rows, ask Claude for
    only the narrative slots (`json_object` mode), render through sandboxed
    Jinja2. **Numbers are computed in `templates/functions.py`, never by the LLM.**
 4. **Free-form fallback** — other intents go through `generator.py`.
@@ -144,12 +144,14 @@ Consumed by `QuantAgent/backend/rag.py`.
 ## Configuration
 
 Everything lives in `config.py`. Required: `SUPABASE_URL`, `SUPABASE_KEY`,
-`MOONSHOT_API_KEY`, `EMBEDDING_SERVICE_URL`.
+`ANTHROPIC_API_KEY`, `EMBEDDING_SERVICE_URL`.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `MOONSHOT_MODEL` | `kimi-k2.5` | Report model |
-| `KIMI_MODEL_CLASSIFY` | `moonshot-v1-8k` | L2 router model |
+| `LLM_MODEL_SUMMARY` | `claude-sonnet-5-5` | Report model |
+| `LLM_MODEL_QA` | `claude-haiku-5-5` | Q&A stream + structured JSON |
+| `LLM_MODEL_CLASSIFY` | `claude-haiku-5-5` | L2 router model |
+| `LLM_EFFORT_QA` | `medium` | Q&A thinking depth (`low` for lowest latency) |
 | `MAX_CONTEXT_CHARS` | `380000` | Per-ticker context budget |
 | `SEMANTIC_TOP_K` | `8` | Retriever top-K |
 | `SIMILARITY_THRESHOLD` | `0.3` | Cosine threshold |

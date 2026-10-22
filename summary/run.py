@@ -16,7 +16,7 @@ import sys
 from datetime import date
 from pathlib import Path
 
-from config import OUTPUT_DIR, MOONSHOT_MODEL
+from config import OUTPUT_DIR, LLM_MODEL_SUMMARY
 from summary.fetcher import fetch_context
 from summary.summarizer import generate_summary
 from summary.prompts import PROMPT_VERSION
@@ -70,7 +70,7 @@ def process_ticker(ticker: str, dry_run: bool = False) -> bool:
             logger.warning(f"No data found for {ticker}, skipping.")
             return False
 
-        input_hash = compute_input_hash(ctx, MOONSHOT_MODEL, PROMPT_VERSION)
+        input_hash = compute_input_hash(ctx, LLM_MODEL_SUMMARY, PROMPT_VERSION)
 
         if dry_run:
             logger.info(
@@ -102,7 +102,7 @@ def process_ticker(ticker: str, dry_run: bool = False) -> bool:
             ticker=ticker,
             input_hash=input_hash,
             content=report,
-            model=MOONSHOT_MODEL,
+            model=LLM_MODEL_SUMMARY,
             prompt_version=PROMPT_VERSION,
             source_doc_ids=ctx.source_doc_ids,
         )
@@ -174,13 +174,13 @@ def run_skill(name: str, args: dict) -> bool:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate investment analysis reports via Kimi (Moonshot)")
+    parser = argparse.ArgumentParser(description="Generate investment analysis reports via Claude")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--ticker", type=str, help="Comma-separated ticker symbols (e.g. AAPL,MSFT)")
     group.add_argument("--all", action="store_true", help="Process all active tickers from Supabase")
     group.add_argument("--skill", type=str, help="Run a skill by name (see `python -m summary.run --list-skills`)")
     group.add_argument("--list-skills", action="store_true", help="List available skills and exit")
-    parser.add_argument("--dry-run", action="store_true", help="Fetch data only, skip Moonshot API call")
+    parser.add_argument("--dry-run", action="store_true", help="Fetch data only, skip Claude API call")
     parser.add_argument("--args", type=str, default="", help='Skill arguments: JSON ({"k":"v"}) or k=v,k=v')
     args = parser.parse_args()
 

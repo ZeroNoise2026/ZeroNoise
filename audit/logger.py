@@ -7,9 +7,9 @@ Usage:
 
     log_api_call(
         service="question",
-        api_type="kimi_llm",
-        endpoint="chat.completions",
-        model="moonshot-v1-8k",
+        api_type="claude_llm",
+        endpoint="messages",
+        model="claude-haiku-5-5",
         tokens_in=120, tokens_out=50, tokens_total=170,
         latency_ms=530,
     )

@@ -12,7 +12,9 @@ import logging
 import queue
 import time
 
-from shared.db import is_tracked, update_last_queried, promote_ticker
+from config import HOT_PROMOTION_THRESHOLD
+from shared.db import is_tracked, is_ingested, promote_ticker
+from shared.db import record_ticker_query, count_recent_ticker_queries
 from shared.db import get_earnings, get_price_snapshots
 from question.models import AskRequest, Intent, QueryMode, Source
 from question.router import router
@@ -35,6 +37,18 @@ def _dedupe_sources(sources: list[Source]) -> list[dict]:
     return out
 
 logger = logging.getLogger(__name__)
+
+
+def _maybe_promote(ticker: str) -> None:
+    """Count a Tier 2 query; promote the ticker once it's hot (>=N queries in 24h).
+
+    Counted in Postgres, not in-process, so all service instances share one tally.
+    """
+    record_ticker_query(ticker)
+    if is_tracked(ticker):
+        return  # already promoted, waiting for the pipeline to ingest it
+    if count_recent_ticker_queries(ticker) >= HOT_PROMOTION_THRESHOLD:
+        promote_ticker(ticker)
 
 
 def _fmt_money(val) -> str:
@@ -104,7 +118,7 @@ async def _structured_earnings_response(query: str, tickers: list[str], target_q
     """Path A for EARNINGS_ANALYSIS. Raises _StructuredFallback on any failure."""
     from question.schemas import earnings_analysis as EA
     from question.templates import render, RenderError
-    from question.kimi_structured import generate_json, StructuredGenError
+    from question.structured import generate_json, StructuredGenError
 
     parts: list[str] = []
     for ticker in tickers:
@@ -131,7 +145,7 @@ async def _structured_earnings_response(query: str, tickers: list[str], target_q
                 intent_label=f"earnings:{ticker}",
             )
         except StructuredGenError as e:
-            raise _StructuredFallback(f"KIMI structured gen failed: {e}")
+            raise _StructuredFallback(f"LLM structured gen failed: {e}")
 
         try:
             ctx = EA.build_context(
@@ -156,7 +170,7 @@ async def _structured_comparison_response(query: str, tickers: list[str], target
     """Path A for COMPARISON. Raises _StructuredFallback on any failure."""
     from question.schemas import comparison as CMP
     from question.templates import render, RenderError
-    from question.kimi_structured import generate_json, StructuredGenError
+    from question.structured import generate_json, StructuredGenError
 
     per_ticker = {t: get_earnings(t, limit=8) for t in tickers}
     missing = [t for t, r in per_ticker.items() if not r]
@@ -183,7 +197,7 @@ async def _structured_comparison_response(query: str, tickers: list[str], target
             max_tokens=1500,
         )
     except StructuredGenError as e:
-        raise _StructuredFallback(f"KIMI structured gen failed: {e}")
+        raise _StructuredFallback(f"LLM structured gen failed: {e}")
 
     try:
         ctx = CMP.build_context(
@@ -316,7 +330,7 @@ async def handle_ask_stream(req: AskRequest):
             # fall through to legacy path
 
     # ── Normal path: retrieve + LLM ────────────────────────────────
-    tier1_tickers = [t for t in tickers if is_tracked(t)]
+    tier1_tickers = [t for t in tickers if is_ingested(t)]
     tier2_tickers = [t for t in tickers if t not in tier1_tickers]
     yield ("status", f"📡 Searching data for {', '.join(tickers)}...")
     all_context_parts: list[str] = []
@@ -349,6 +363,7 @@ async def handle_ask_stream(req: AskRequest):
         # tier2 (untracked tickers) goes through live API fetcher — not yet
         # producing Source objects. Skipping citations for these for now;
         # frontend will just show fewer sources.
+        _maybe_promote(t)
         cached = cache.get(t, intent)
         if cached:
             all_context_parts.append(cached)
@@ -362,9 +377,9 @@ async def handle_ask_stream(req: AskRequest):
     yield ("status", "🤖 Generating answer...")
 
     # Stream generation — run sync generator in thread to avoid blocking event loop.
-    # kimi-k2.5 is a reasoning model: ~60s of reasoning chunks (no content)
-    # followed by content chunks. Without threading, the sync for loop blocks
-    # the event loop, causing SSE connections to die.
+    # The model may stream thinking chunks before content chunks. Without
+    # threading, the sync for loop blocks the event loop, causing SSE
+    # connections to die.
     q: queue.Queue = queue.Queue()
     SENTINEL = object()
 

@@ -4,7 +4,7 @@ Run from Summarization/:
     python -m tests.test_sources
 
 Strategy: monkeypatch router/retrieve/generator/structured-gen so we never
-hit Supabase or KIMI. We only assert the orchestrator's outgoing event
+hit Supabase or the LLM. We only assert the orchestrator's outgoing event
 sequence contains a `sources` event with the expected shape.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import os
 # Stub env early so imports don't fail
 os.environ.setdefault("SUPABASE_URL", "http://stub")
 os.environ.setdefault("SUPABASE_KEY", "stub")
-os.environ.setdefault("MOONSHOT_API_KEY", "stub")
+os.environ.setdefault("ANTHROPIC_API_KEY", "stub")
 os.environ.setdefault("EMBEDDING_SERVICE_URL", "http://stub:8002")
 
 from question import orchestrator as orch  # noqa: E402
@@ -109,11 +109,11 @@ def test_path_b_emits_doc_sources_after_llm_stream():
     orch.router.route = lambda *_a, **_k: _route(
         Intent.NEWS_SUMMARY, ["AAPL"], mode=QueryMode.SEMANTIC,
     )
-    # Make is_tracked say AAPL is tier1 so retrieve() runs.
+    # Make is_ingested say AAPL is tier1 so retrieve() runs.
     # Stub at the orchestrator namespace where it was imported (avoids
     # touching shared.db which lazily creates a real Supabase client and
     # blows up under sandbox proxies).
-    orch.is_tracked = lambda t: True
+    orch.is_ingested = lambda t: True
 
     fake_sources = [
         Source(

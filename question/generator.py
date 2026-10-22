@@ -1,14 +1,14 @@
 """
 question/generator.py
-KIMI LLM integration — sync + streaming (SSE).
+Claude LLM integration — streaming (SSE).
 Delegates to shared.llm for client management and retry logic.
 """
 
 import logging
 from typing import Generator
 
-from shared.llm import chat_stream, pick_model
-from config import LLM_TEMPERATURE, LLM_MAX_TOKENS
+from shared.llm import chat_stream
+from config import LLM_MODEL_QA, LLM_EFFORT_QA, LLM_MAX_TOKENS
 from question.prompts import SYSTEM_PROMPT, build_qa_prompt
 
 logger = logging.getLogger(__name__)
@@ -22,9 +22,8 @@ def generate_answer_stream(
     """Generate answer in streaming mode — yields (type, text) tuples for SSE."""
     user_prompt = build_qa_prompt(query, context, data_freshness)
     total_chars = len(SYSTEM_PROMPT) + len(user_prompt)
-    model = pick_model(total_chars)
 
-    logger.info(f"QA stream: model={model}, prompt ~{total_chars:,} chars")
+    logger.info(f"QA stream: model={LLM_MODEL_QA}, effort={LLM_EFFORT_QA}, prompt ~{total_chars:,} chars")
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -33,7 +32,7 @@ def generate_answer_stream(
 
     yield from chat_stream(
         messages=messages,
-        model=model,
-        temperature=LLM_TEMPERATURE,
+        model=LLM_MODEL_QA,
+        effort=LLM_EFFORT_QA,
         max_tokens=LLM_MAX_TOKENS,
     )

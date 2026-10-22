@@ -1,9 +1,9 @@
 """
 question/router.py
-Two-layer router: L1 keyword matching (free) -> L2 KIMI fallback (when L1 misses)
+Two-layer router: L1 keyword matching (free) -> L2 LLM fallback (when L1 misses)
 
 L1: Regex ticker extraction + keyword intent matching — zero cost, <1ms
-L2: KIMI classification — ~100 tokens, ~500ms, only when L1 score=0 or no tickers found
+L2: LLM classification — ~100 tokens, ~500ms, only when L1 score=0 or no tickers found
 """
 
 import json
@@ -138,7 +138,7 @@ INTENT_TO_DEFAULT_RECENCY: dict[Intent, Recency] = {
 SINGLE_LETTER_TICKERS = {"F", "V", "C", "X", "T"}
 
 # Ambiguous tickers that are also very common English words.
-# These are ONLY blocked from regex extraction; L2 KIMI can still return them.
+# These are ONLY blocked from regex extraction; L2 LLM can still return them.
 # Real tickers removed (query them via L2): ALL, NOW, HAS, IPO, etc.
 COMMON_WORDS = {
     # Single letters (excluding real tickers in SINGLE_LETTER_TICKERS)
@@ -210,9 +210,9 @@ def _extract_quarter(query: str) -> Optional[str]:
 
 
 class QueryRouter:
-    """L1 keyword router, with L2 KIMI fallback when keywords miss."""
+    """L1 keyword router, with L2 LLM fallback when keywords miss."""
 
-    # ── L2 KIMI classification prompt (kept minimal for cost) ──
+    # ── L2 LLM classification prompt (kept minimal for cost) ──
     _CLASSIFY_SYSTEM = (
         "You are a financial query classifier and query expander. "
         "Given a user question, return ONLY a JSON object with four fields:\n"
@@ -254,6 +254,22 @@ class QueryRouter:
         {"role": "assistant", "content": '{"intent":"news_summary","tickers":["AAPL"],"recency":"high","expanded_queries":["Apple new product launch reveal","AAPL executive guidance statement","Apple supply chain manufacturing announcement","Apple acquisition partnership deal"]}'},
     ]
 
+    # Structured-output schema for the L2 call — guarantees parseable JSON.
+    _CLASSIFY_SCHEMA = {
+        "type": "object",
+        "properties": {
+            "intent": {"type": "string", "enum": [
+                "news_summary", "earnings_analysis", "price_query",
+                "trade_suggestion", "comparison", "general_analysis",
+            ]},
+            "tickers": {"type": "array", "items": {"type": "string"}},
+            "recency": {"type": "string", "enum": ["high", "medium", "low", "none"]},
+            "expanded_queries": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["intent", "tickers", "recency", "expanded_queries"],
+        "additionalProperties": False,
+    }
+
     def route(
         self,
         query: str,
@@ -277,10 +293,10 @@ class QueryRouter:
 
         expanded_queries: list[str] = []
 
-        # Decide whether to call L2 KIMI:
+        # Decide whether to call L2 LLM:
         #   (a) L1 missed (score=0 or no ticker), OR
         #   (b) recency=high and we have at least one ticker → kick L2 to also expand the query
-        # (b) lets us reuse the existing KIMI call for query-expansion at zero extra cost.
+        # (b) lets us reuse the existing LLM call for query-expansion at zero extra cost.
         l1_complete = (score > 0 and (len(tickers) > 0 or explicit_tickers))
         wants_expansion = (recency == Recency.HIGH) and (len(tickers) > 0 or explicit_tickers)
         needs_l2 = (not l1_complete) or wants_expansion
@@ -289,9 +305,9 @@ class QueryRouter:
             reason = "L1 incomplete" if not l1_complete else "query expansion (recency=high)"
             logger.info(
                 f"{reason} (score={score}, tickers={tickers}) "
-                f"for: \"{query[:60]}\" -> calling L2 KIMI classify"
+                f"for: \"{query[:60]}\" -> calling L2 LLM classify"
             )
-            l2_intent, l2_tickers, l2_recency, l2_expanded = self._kimi_classify(query)
+            l2_intent, l2_tickers, l2_recency, l2_expanded = self._llm_classify(query)
 
             if l2_intent is not None and score == 0:
                 intent = l2_intent
@@ -355,18 +371,18 @@ class QueryRouter:
             auto_bound_ticker=auto_bound_ticker,
         )
 
-    def _kimi_classify(self, query: str) -> tuple[Optional[Intent], list[str], Optional[Recency], list[str]]:
-        """L2 fallback: ask KIMI to classify intent + extract tickers + detect recency + expand queries.
+    def _llm_classify(self, query: str) -> tuple[Optional[Intent], list[str], Optional[Recency], list[str]]:
+        """L2 fallback: ask the LLM to classify intent + extract tickers + detect recency + expand queries.
 
         Returns (intent_or_None, tickers_list, recency_or_None, expanded_queries).
         On any failure, returns (None, [], None, []) — the caller keeps L1 defaults.
         Cost: ~350 tokens total (system+examples+query+response w/ expansion), ~700ms.
         """
         from shared.llm import chat, has_api_key
-        from config import KIMI_MODEL_CLASSIFY
+        from config import LLM_MODEL_CLASSIFY
 
         if not has_api_key():
-            logger.warning("MOONSHOT_API_KEY not set — L2 KIMI fallback disabled")
+            logger.warning("ANTHROPIC_API_KEY not set — L2 LLM fallback disabled")
             return None, [], None, []
 
         messages = [
@@ -378,24 +394,25 @@ class QueryRouter:
         try:
             raw, usage = chat(
                 messages=messages,
-                model=KIMI_MODEL_CLASSIFY,
-                temperature=0,       # deterministic classification
-                max_tokens=350,      # bumped from 150 to fit expanded_queries array
+                model=LLM_MODEL_CLASSIFY,
+                effort="low",        # classification — keep router fast
+                output_schema=self._CLASSIFY_SCHEMA,
+                max_tokens=2000,     # headroom for thinking + expanded_queries array
                 max_retries=1,       # don't retry — keep router fast
-                timeout=10.0,        # bumped from 8s to give expansion headroom
+                timeout=10.0,
             )
             raw = raw.strip()
             logger.info(
-                f"L2 KIMI classify: tokens={usage['total_tokens']}, raw={raw[:200]}"
+                f"L2 LLM classify: tokens={usage['total_tokens']}, raw={raw[:200]}"
             )
             return self._parse_classify_response(raw)
 
         except Exception as e:
-            logger.warning(f"L2 KIMI classify failed, falling back to L1 defaults: {e}")
+            logger.warning(f"L2 LLM classify failed, falling back to L1 defaults: {e}")
             return None, [], None, []
 
     def _parse_classify_response(self, raw: str) -> tuple[Optional[Intent], list[str], Optional[Recency], list[str]]:
-        """Parse KIMI's JSON response into (Intent, tickers, Recency, expanded_queries).
+        """Parse the LLM's JSON response into (Intent, tickers, Recency, expanded_queries).
 
         Handles: plain JSON, markdown-fenced JSON, partial garbage.
         """

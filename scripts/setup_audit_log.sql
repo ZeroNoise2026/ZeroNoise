@@ -11,9 +11,9 @@ CREATE TABLE IF NOT EXISTS api_audit_log (
     service      TEXT NOT NULL,          -- 'summary' | 'question' | 'data-pipeline'
 
     -- WHAT (comma-separated if multiple APIs in one operation, e.g. 'finnhub,fmp')
-    api_type     TEXT NOT NULL,          -- 'kimi_llm' | 'embedding' | 'finnhub' | 'fmp' | 'finnhub,fmp'
+    api_type     TEXT NOT NULL,          -- 'claude_llm' (legacy: 'kimi_llm') | 'embedding' | 'finnhub' | 'fmp' | 'finnhub,fmp'
     endpoint     TEXT,                   -- 'chat.completions' | '/api/finnhub/news/AAPL'
-    model        TEXT,                   -- 'moonshot-v1-8k' | NULL for non-LLM
+    model        TEXT,                   -- 'claude-haiku-5-5' | NULL for non-LLM
 
     -- LLM metrics (NULL for non-LLM calls)
     tokens_in    INT,

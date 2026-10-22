@@ -1,6 +1,6 @@
 """
 scripts/test_retrieval.py
-Test the 3 retrieval paths via REAL HTTP calls — no KIMI needed.
+Test the 3 retrieval paths via REAL HTTP calls — no LLM needed.
 
 Tests:
   R1: Embedding encode (HTTP → embedding-service :8002)
@@ -401,7 +401,7 @@ async def test_r7():
 async def main():
     p("╔" + "═" * 76 + "╗")
     p("║  Retrieval Path Tests — SEMANTIC / STRUCTURED / HYBRID               ║")
-    p("║  Dependencies: embedding-service :8002 + Supabase (no KIMI needed)   ║")
+    p("║  Dependencies: embedding-service :8002 + Supabase (no LLM needed)   ║")
     p("╚" + "═" * 76 + "╝")
 
     # Verify deps

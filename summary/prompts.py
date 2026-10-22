@@ -1,6 +1,6 @@
 """
 summary/prompts.py
-Prompt templates for generating investment analysis reports via Moonshot (Kimi).
+Prompt templates for generating investment analysis reports via Claude.
 """
 
 from summary.fetcher import TickerContext
