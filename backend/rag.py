@@ -4,7 +4,7 @@ Proxy to question-service for RAG-based Q&A.
 
 Instead of running its own embedding/vector-search/LLM pipeline,
 this module delegates to the question-service (:8003) which handles
-routing, tier1/tier2 retrieval, and KIMI generation.
+routing, tier1/tier2 retrieval, and LLM generation.
 """
 from __future__ import annotations
 

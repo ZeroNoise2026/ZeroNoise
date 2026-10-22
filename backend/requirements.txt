@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 supabase
 python-dotenv
-openai
+anthropic>=2.1.0
 requests
 pydantic
 pyjwt[crypto]>=2.8
@@ -19,4 +19,7 @@ chardet>=5.2
 # this backend/ directory and can never reach a sibling repo. Without this the
 # `import skills` in main.py fails inside the image and skill routing is
 # silently dead in Cloud Run.
-quantagent-skills @ git+https://github.com/ZeroNoise2026/Skills.git@main
+# Pinned to a commit, not @main: with Docker layer caching an unpinned branch
+# means two builds of the same backend SHA can ship different Skills.
+# Bump with:  ./deploy.sh preflight  (it warns when this drifts from ../Skills)
+quantagent-skills @ git+https://github.com/ZeroNoise2026/Skills.git@98af10486483b283627b5176ae909f1333836a6d

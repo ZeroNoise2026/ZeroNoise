@@ -215,15 +215,15 @@
       <div class="card-title">Summarization</div>
       <div class="card-repo">Summarization/</div>
       <div class="card-desc">
-        Fetches per-ticker data → builds prompt → calls Moonshot (Kimi) → outputs Markdown report.
+        Fetches per-ticker data → builds prompt → calls Claude → outputs Markdown report.
         <br><br>
         Now includes <strong style="color:#ef4444">Regulatory & Compliance Events</strong> section <span class="badge-new">NEW</span>
       </div>
     </div>
     <div class="card ai">
       <div class="card-icon">🤖</div>
-      <div class="card-title">Moonshot / Kimi API</div>
-      <div class="card-desc">LLM backend (kimi-k2.5, 128k context). Generates summaries, briefings, and RAG answers.</div>
+      <div class="card-title">Anthropic Claude API</div>
+      <div class="card-desc">LLM backend (Haiku 5.5 for Q&amp;A, routing and briefings; Sonnet 5.5 for research reports). 1M context.</div>
     </div>
   </div>
 </div>
@@ -267,7 +267,7 @@
     <span class="flow-arrow">→</span>
     <div class="flow-box fb-llm">prompts.py<br><small>build structured prompt</small></div>
     <span class="flow-arrow">→</span>
-    <div class="flow-box fb-llm">Moonshot API<br><small>kimi-k2.5</small></div>
+    <div class="flow-box fb-llm">Claude API<br><small>Haiku 5.5 / Sonnet 5.5</small></div>
     <span class="flow-arrow">→</span>
     <div class="flow-box fb-output">Markdown Report<br><small>with compliance section</small></div>
   </div>

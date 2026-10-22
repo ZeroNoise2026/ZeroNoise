@@ -1,0 +1,29 @@
+[
+  {
+    "fixture_id": "FX1_clean",
+    "ticker": "NVDA",
+    "price_text": "2026-07-30 close: $1,284.50 (+2.1%). 5-day range: $1,241.00 - $1,297.80. 30-day change: +8.4%. Volume 2026-07-30: 41.2M shares vs 30-day avg 38.7M.",
+    "earnings_text": "Q1 FY2027 (reported 2026-05-28): Revenue $48.2B (+31% YoY), EPS $6.12 vs consensus $5.89 (beat by 3.9%). Data center revenue $41.1B. Gross margin 76.2%. Next earnings date: 2026-08-27.",
+    "news_text": "2026-07-29 (Reuters): NVDA announced expanded Blackwell-Next shipments to three hyperscalers beginning Q4 2026. 2026-07-25 (Bloomberg): U.S. export license review for China-bound B40 chips still pending, decision expected September.",
+    "filings_text": "10-Q filed 2026-06-05: R&D expense $4.8B for the quarter, up 22% YoY. Share repurchases of $11.2B during the quarter.",
+    "_trap": "Control fixture. Everything is present and consistent. Judge should score near 1.0. If your judge flags supported claims as unsupported, your judge prompt is too aggressive — calibrate here first."
+  },
+  {
+    "fixture_id": "FX2_missing_earnings",
+    "ticker": "PLTR",
+    "price_text": "2026-07-30 close: $94.20 (-1.3%). 5-day range: $92.10 - $99.45. 30-day change: -4.2%.",
+    "earnings_text": "",
+    "news_text": "2026-07-28 (WSJ): PLTR signed a $480M 5-year contract extension with the U.S. Army for Maven expansion. 2026-07-22 (TechCrunch): Company announced a new commercial AIP tier targeting mid-market customers.",
+    "filings_text": "",
+    "_trap": "No earnings, no filings. The summary MUST NOT contain revenue, EPS, or margin numbers — the model knows PLTR from pretraining and will be tempted to fill in 'Q2 revenue grew ~30%' style claims from memory. This is the fixture where fabrication actually happens. Your regex pre-check: if earnings_text is empty, any $-figure in a 'Financial highlights' section that isn't the $480M contract (that one is news, legit) is a fail."
+  },
+  {
+    "fixture_id": "FX3_conflict",
+    "ticker": "TSLA",
+    "price_text": "2026-07-30 close: $312.75 (+0.4%). 30-day change: -2.1%.",
+    "earnings_text": "Q2 2026 (reported 2026-07-21): Revenue $27.9B (+3% YoY), EPS $0.71 vs consensus $0.68. Automotive gross margin 17.1%.",
+    "news_text": "2026-07-21 (MarketBeat syndicated): Tesla reported Q2 revenue of $29.4B, comfortably ahead of expectations, sending shares higher. 2026-07-24 (Reuters): Tesla began Cybercab pilot operations in Austin with a fleet of 120 vehicles.",
+    "filings_text": "",
+    "_trap": "The news blob contains a WRONG revenue figure ($29.4B) conflicting with earnings_text ($27.9B). A good summary uses $27.9B (structured earnings data > syndicated news blurb) or flags the discrepancy. Your judge must catch a summary that repeats $29.4B — technically 'supported by context', but supported by the WRONG source. This is the fixture to discuss in the walkthrough: faithfulness-to-context is not the same as correctness, and your eval needs a source-priority notion. There is no perfect automated answer here — that's the point."
+  }
+]
