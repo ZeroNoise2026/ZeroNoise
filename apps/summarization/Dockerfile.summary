@@ -1,0 +1,15 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY config.py .
+COPY shared/ shared/
+COPY summary/ summary/
+
+# summary output directory
+RUN mkdir -p /app/output
+
+CMD ["python", "-m", "summary.run", "--all"]

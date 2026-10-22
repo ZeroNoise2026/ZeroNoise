@@ -1,0 +1,12 @@
+# Shared (Supabase + Claude)
+supabase
+python-dotenv
+anthropic>=2.1.0
+
+# question service
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+httpx>=0.27.0
+jinja2
+jsonschema

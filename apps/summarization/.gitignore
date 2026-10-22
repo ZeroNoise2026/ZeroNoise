@@ -1,0 +1,15 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+node_modules/
+.idea/
+.vscode/
+output/
+.vite/
+.DS_Store
+*.log
+scripts/supabase-mcp/
+scripts/*.log
