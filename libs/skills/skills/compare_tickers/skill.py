@@ -1,8 +1,9 @@
 """
 skills/compare_tickers/skill.py
 
-Multi-ticker comparison. For each ticker we call the same Summarization
-fetch_context() the report skill uses (so the data is identical), then
+Multi-ticker comparison. For each ticker we call the same
+research.context.fetch_context() the report skill uses (so the data is
+identical), then
 assemble a single prompt that asks the LLM for a side-by-side comparison
 table + qualitative read.
 
@@ -16,18 +17,13 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
-from pathlib import Path
 from typing import Any
 
-from skills._llm import chat
+from common.llm import chat
+from research.context import TickerContext, fetch_context
 from skills.base import Skill, SkillResult
 
 logger = logging.getLogger("skills.compare_tickers")
-
-# Depth note: this file is <repo-root>/libs/skills/skills/<pkg>/skill.py, so
-# parents[4] is the monorepo root. Update if this file ever moves.
-_SUMMARIZATION_DIR = Path(__file__).resolve().parents[4] / "apps" / "summarization"
 
 # Per-ticker character budget. Three tickers × 80k ≈ 240k chars ≈ ~60k
 # tokens — well inside the 1M context and under Haiku's 100k-token
@@ -61,22 +57,16 @@ Rules:
   default to English."""
 
 
-def _ensure_summarization_importable() -> None:
-    p = str(_SUMMARIZATION_DIR)
-    if p not in sys.path:
-        sys.path.insert(0, p)
-
-
 def _truncate(text: str, budget: int) -> str:
     if len(text) <= budget:
         return text
     return text[:budget] + "\n\n…[truncated]"
 
 
-def _format_ticker_block(ctx: Any, budget: int) -> str:
+def _format_ticker_block(ctx: TickerContext, budget: int) -> str:
     """Render a TickerContext into a labeled text block for the prompt.
 
-    We don't reuse summary.prompts.build_user_prompt because that builds a
+    We don't reuse research.report.build_user_prompt because that builds a
     full single-ticker user prompt; here we just want a compact chunk we
     can repeat for N tickers.
     """
@@ -132,9 +122,6 @@ class CompareTickersSkill(Skill):
         if len(tickers) < 2:
             raise ValueError("compare_tickers needs at least 2 valid tickers")
 
-        _ensure_summarization_importable()
-        from summary.fetcher import fetch_context  # noqa: E402
-
         blocks: list[str] = []
         ticker_chars: dict[str, int] = {}
         missing: list[str] = []
@@ -151,7 +138,7 @@ class CompareTickersSkill(Skill):
             return SkillResult(
                 content=(
                     "No data found in Supabase for any of the requested "
-                    f"tickers: {', '.join(tickers)}. Has the data-pipeline "
+                    f"tickers: {', '.join(tickers)}. Has the pipeline "
                     "ingested them?"
                 ),
                 meta={"tickers": tickers, "empty": True},
@@ -180,6 +167,7 @@ class CompareTickersSkill(Skill):
                 {"role": "user", "content": user_prompt},
             ],
             model=_COMPARE_MODEL,
+            service="skills",
         )
 
         return SkillResult(

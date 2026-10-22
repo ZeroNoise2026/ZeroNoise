@@ -1,10 +1,10 @@
 # Skills
 
-Shared **skill framework** for the QuantAgent stack. A skill is a self-contained
+Shared **skill framework** for the zeroNoise stack. A skill is a self-contained
 capability — write a research report, compare tickers, explain a filing — that
 any consumer in the project can invoke.
 
-> Part of the QuantAgent monorepo. Run `./dev.sh` from the repo root — it sets
+> Part of the zeroNoise monorepo. Run `./dev.sh` from the repo root — it sets
 > up this directory's venv and `.env`.
 
 > **For PMs / analysts:** this is where reusable analyst workflows live. Today
@@ -21,17 +21,18 @@ any consumer in the project can invoke.
 ```
 libs/skills/                  <- this directory
 ├── pyproject.toml            packaging; declares the `skills` package
-├── .github/workflows/ci.yml  import guard on Linux + offline suite
 └── skills/                   <- THE IMPORTABLE PACKAGE
     ├── __init__.py           public re-exports
     ├── base.py               Skill ABC + SkillResult
     ├── registry.py           auto-discovery of skills/*/skill.py
     ├── router.py             message -> (skill, args) classifier
-    ├── _llm.py               neutral Claude client
     ├── generate_report/      SKILL.md + skill.py
     ├── compare_tickers/      SKILL.md + skill.py
     └── tests/
 ```
+
+Skills depend only on other libs: the LLM call goes through `common.llm`, data
+and reports through `libs/research`. CI: `.github/workflows/skills-ci.yml`.
 
 ### Why the package sits in a subdirectory
 
@@ -44,11 +45,11 @@ populated.
 ## Install
 
 ```bash
-pip install -e libs/skills          # from the repo root; editable
+pip install -e libs/common -e libs/research -e libs/skills   # from the repo root; editable
 ```
 
-`./dev.sh setup` does the editable install into the backend venv
-automatically; `apps/backend/Dockerfile` installs it from the same checkout.
+`./dev.sh setup` does the editable install into every venv that needs it;
+the Dockerfiles install it from the same checkout.
 
 ## Available skills
 
@@ -79,7 +80,7 @@ python -m summary.run --skill generate_report --args ticker=AAPL
 python -m summary.run --skill compare_tickers --args '{"tickers":["AAPL","MSFT"]}'
 ```
 
-From the QuantAgent chat endpoint: `backend/main.py` already calls the router
+From the backend chat endpoint: `apps/backend/main.py` already calls the router
 inside `/api/chat/stream`. Per message:
 
 ```python
@@ -160,15 +161,6 @@ python -m skills.tests.test_live_router    # real Claude call; needs the key
 
 CI runs the first one on ubuntu plus an import guard.
 
-## Reaching into apps/summarization (known rule violation)
-
-`generate_report` and `compare_tickers` reach into `apps/summarization` for data
-and LLM access, via
-`Path(__file__).resolve().parents[4] / "apps" / "summarization"`. That breaks
-the monorepo rule (apps never get imported by libs) and is slated to go: the
-shared pieces move into `libs/`, or these two skills move into the app that
-owns them.
-
 ## Design notes
 
 - **Synchronous, not async.** Both consumers are sync; the bottleneck is the
@@ -178,16 +170,12 @@ owns them.
   can keep request-scoped state on `self` safely.
 - **No persistence.** Results go back to the caller; there is no `skill_runs`
   table. `SkillResult.artifacts` is the escape hatch for skills that write files.
-- **`_llm.py` is the survivor.** Two near-identical Claude wrappers exist
-  elsewhere (`apps/summarization/shared/llm.py`, `apps/backend/summarizer.py`).
-  When those three are consolidated, this is the one to keep.
 
 ## Known tech debt
 
 - `registry.invoke()` does not validate kwargs against the JSON schema. Harmless
   while a human reads the output; genuinely dangerous the day this runs in a
   loop, where a bad arg silently corrupts a whole trajectory.
-- The Claude client is duplicated in three places (see above).
 - `compare_tickers` lets the LLM build the metrics table. More robust would be
   to assemble it deterministically from `earnings` / `price_snapshot` and let the
   LLM write only the prose around it — the pattern `apps/summarization/question`

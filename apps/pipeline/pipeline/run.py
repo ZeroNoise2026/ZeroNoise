@@ -504,7 +504,7 @@ def process_ticker(
 
 @flow(name="quant-data-pipeline", log_prints=True)
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run QuantAgent data pipeline")
+    parser = argparse.ArgumentParser(description="Run the data pipeline")
     parser.add_argument("--ticker", type=str, default=None,
                         help="Process a single ticker (uppercase, e.g. AAPL)")
     parser.add_argument("--dry-run", action="store_true",

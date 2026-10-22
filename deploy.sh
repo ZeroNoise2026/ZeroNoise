@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# deploy.sh — single entry point for deploying the QuantAgent stack to GCP.
+# deploy.sh — single entry point for deploying the zeroNoise stack to GCP.
 #
 # dev.sh runs the stack on your laptop. This runs it on Cloud Run, from the
 # same monorepo, the same .env files and the same service registry — so there is
@@ -73,13 +73,12 @@ svc_dir() {
     *) return 1 ;;
   esac
 }
-# Docker build context. backend builds from the repo root so the image can
-# COPY libs/ (shared code lives outside the app directory); the rest build from
-# their own app directory.
+# Docker build context. Services that use libs/ build from the repo root so
+# the image can COPY them; the rest build from their own app directory.
 svc_context() {
   case "$1" in
-    backend) echo "$ROOT" ;;
-    *)       svc_dir "$1" ;;
+    backend|question) echo "$ROOT" ;;
+    *)                svc_dir "$1" ;;
   esac
 }
 # `gcloud run deploy --source .` only ever looks for a file named "Dockerfile".
@@ -88,7 +87,7 @@ svc_dockerfile() {
   case "$1" in
     embedding) echo "Dockerfile" ;;
     pipeline)  echo "Dockerfile.api" ;;
-    question)  echo "Dockerfile.question" ;;
+    question)  echo "apps/summarization/Dockerfile.question" ;;   # relative to svc_context
     backend)   echo "apps/backend/Dockerfile" ;;   # relative to svc_context
   esac
 }
@@ -99,7 +98,7 @@ svc_label() {
     embedding) echo "embedding-service (vectors)" ;;
     pipeline)  echo "data-pipeline API (live lookups)" ;;
     question)  echo "question-service (RAG Q&A)" ;;
-    backend)   echo "QuantAgent backend (BFF)" ;;
+    backend)   echo "backend (BFF)" ;;
   esac
 }
 # Secrets pulled from Secret Manager at runtime — never baked into the revision.

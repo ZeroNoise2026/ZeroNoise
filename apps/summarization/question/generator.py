@@ -7,7 +7,7 @@ Delegates to shared.llm for client management and retry logic.
 import logging
 from typing import Generator
 
-from shared.llm import chat_stream
+from common.llm import chat_stream
 from config import LLM_MODEL_QA, LLM_EFFORT_QA, LLM_MAX_TOKENS
 from question.prompts import SYSTEM_PROMPT, build_qa_prompt
 

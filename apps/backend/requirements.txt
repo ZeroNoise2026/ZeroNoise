@@ -1,19 +1,16 @@
+# Also needs libs/common, libs/research and libs/skills; dev.sh and the
+# Dockerfile install them from the monorepo checkout (a relative path here
+# would depend on the working directory).
 fastapi
 uvicorn[standard]
-supabase
 python-dotenv
-anthropic>=2.1.0
 requests
 pydantic
 pyjwt[crypto]>=2.8
 
-# File parsing (Phase 2)
+# File parsing
 python-multipart>=0.0.9
 openpyxl>=3.1
 pypdf>=4.2
 python-docx>=1.1
 chardet>=5.2
-
-# The shared `skills` package lives in libs/skills. The Dockerfile installs it
-# from the monorepo checkout; locally, dev.sh installs it editable. Not listed
-# here because a relative path would depend on the working directory.

@@ -1,15 +1,18 @@
 """
 config.py
-All environment variables for the Summarization repo — single source of truth.
+Environment for apps/summarization (question service + summary CLI).
+
+Importing this module loads .env. Credentials (SUPABASE_URL, SUPABASE_KEY,
+ANTHROPIC_API_KEY) and the report settings (LLM_MODEL_SUMMARY,
+LLM_EFFORT_SUMMARY, MAX_CONTEXT_CHARS) are read from the environment by
+libs/common and libs/research; only app-specific settings live here.
 
 Sections:
-  1. Supabase (shared)
-  2. Anthropic / Claude (shared)
-  3. Summary-service settings
-  4. Question-service settings
-  5. Upstream service URLs
-  6. Vector search parameters
-  7. Tier 2 cache parameters
+  1. Summary CLI
+  2. Question-service LLM settings
+  3. Upstream service URLs
+  4. Vector search parameters
+  5. Tier 2 cache parameters
 """
 
 import os
@@ -19,27 +22,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ═══════════════════════════════════════════
-# 1. Supabase (shared by summary + question)
+# 1. Summary CLI
 # ═══════════════════════════════════════════
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-# ═══════════════════════════════════════════
-# 2. Anthropic / Claude credentials (shared)
-# ═══════════════════════════════════════════
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-
-# ═══════════════════════════════════════════
-# 3. Summary-service settings
-# ═══════════════════════════════════════════
-LLM_MODEL_SUMMARY = os.getenv("LLM_MODEL_SUMMARY", "claude-sonnet-5-5")
-LLM_EFFORT_SUMMARY = os.getenv("LLM_EFFORT_SUMMARY", "high")
-MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "380000"))
 OUTPUT_DIR = Path(__file__).parent / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
 
 # ═══════════════════════════════════════════
-# 4. Question-service LLM settings
+# 2. Question-service LLM settings
 # ═══════════════════════════════════════════
 LLM_MODEL_QA: str = os.getenv("LLM_MODEL_QA", "claude-haiku-5-5")
 LLM_MODEL_CLASSIFY: str = os.getenv("LLM_MODEL_CLASSIFY", "claude-haiku-5-5")
@@ -49,13 +37,13 @@ LLM_EFFORT_QA: str = os.getenv("LLM_EFFORT_QA", "medium")
 LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "16000"))
 
 # ═══════════════════════════════════════════
-# 5. Upstream service URLs
+# 3. Upstream service URLs
 # ═══════════════════════════════════════════
 EMBEDDING_SERVICE_URL: str = os.getenv("EMBEDDING_SERVICE_URL", "http://localhost:8002")
 DATA_PIPELINE_URL: str = os.getenv("DATA_PIPELINE_URL", "http://localhost:8001")
 
 # ═══════════════════════════════════════════
-# 6. Vector search parameters
+# 4. Vector search parameters
 # ═══════════════════════════════════════════
 SEMANTIC_TOP_K: int = int(os.getenv("SEMANTIC_TOP_K", "8"))
 SIMILARITY_THRESHOLD: float = float(os.getenv("SIMILARITY_THRESHOLD", "0.3"))
@@ -87,7 +75,7 @@ EXPANSION_TOP_K_PER_QUERY: int = int(os.getenv("EXPANSION_TOP_K_PER_QUERY", "16"
 EXPANSION_MAX_QUERIES: int = int(os.getenv("EXPANSION_MAX_QUERIES", "4"))
 
 # ═══════════════════════════════════════════
-# 7. Tier 2 cache parameters
+# 5. Tier 2 cache parameters
 # ═══════════════════════════════════════════
 TIER2_CACHE_MAX_SIZE: int = int(os.getenv("TIER2_CACHE_MAX_SIZE", "200"))
 TIER2_CACHE_TTL_PRICE: int = int(os.getenv("TIER2_CACHE_TTL_PRICE", "300"))

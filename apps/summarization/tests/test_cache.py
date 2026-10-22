@@ -1,9 +1,9 @@
-"""Smoke tests for summary.cache.compute_input_hash.
+"""Smoke tests for research.cache.compute_input_hash.
 
-Run: python -m tests.test_cache  (from Summarization/)
+Run: python -m tests.test_cache  (from apps/summarization/)
 """
-from summary.cache import compute_input_hash
-from summary.fetcher import TickerContext
+from research.cache import compute_input_hash
+from research.context import TickerContext
 
 
 def _ctx(ticker="AAPL", ids=None):

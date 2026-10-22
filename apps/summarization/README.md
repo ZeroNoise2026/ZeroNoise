@@ -1,8 +1,9 @@
 # Summarization
 
-Two co-located services sharing one data layer and one LLM client.
+Two co-located entry points: the `summary` report CLI and the `question` RAG
+service.
 
-> Part of the QuantAgent monorepo. Run `./dev.sh` from the repo root — it sets
+> Part of the zeroNoise monorepo. Run `./dev.sh` from the repo root — it sets
 > up this directory's venv and `.env`.
 
 | Service | Form | Purpose |
@@ -15,9 +16,10 @@ Two co-located services sharing one data layer and one LLM client.
 > is the engine behind chat answers like "how was AAPL's last quarter" — it
 > makes sure the numbers come from the database, not the model's memory.
 
-> **For engineers:** two services, one repo, one venv, one config. `summary/` is
-> a CLI, `question/` is a FastAPI app. They share `config.py`, `shared/` (LLM
-> client, DB access, formatters) and `audit/`.
+> **For engineers:** `summary/` is a thin CLI over `research.report.build_report`
+> (libs/research); `question/` is a FastAPI app. Both use `config.py` and
+> `shared/` (question-owned DB queries, HTTP clients); the Claude client,
+> Supabase client and audit log come from libs/common.
 
 ## Architecture
 
@@ -27,11 +29,11 @@ Two co-located services sharing one data layer and one LLM client.
        ┌──────────────────┘          └──────────────────┐
    summary/                                        question/
    ┌──────────────────────┐                  ┌──────────────────────┐
-   │ fetcher → prompts →  │                  │ FastAPI :8003        │
-   │ summarizer (Claude)  │                  │  /api/ask/stream     │
-   │ → cache → output/    │                  │ router → orchestrator│
-   └──────────────────────┘                  │   ├─ retriever (RAG) │
-                                             │   ├─ live_fetcher    │
+   │ run.py (CLI)         │                  │ FastAPI :8003        │
+   │  └─ research.report  │                  │  /api/ask/stream     │
+   │     .build_report()  │                  │ router → orchestrator│
+   │     → output/        │                  │   ├─ retriever (RAG) │
+   └──────────────────────┘                  │   ├─ live_fetcher    │
                                              │   ├─ structured      │
                                              │   └─ templates/      │
                                              └──────────────────────┘
@@ -40,15 +42,11 @@ Two co-located services sharing one data layer and one LLM client.
 ## Layout
 
 ```
-Summarization/
-├── config.py                  single source of truth for env vars
-├── summary/                   ── offline report service ──
-│   ├── run.py                 CLI entry (python -m summary.run)
-│   ├── fetcher.py             assemble TickerContext from Supabase
-│   ├── prompts.py             SYSTEM_PROMPT, build_user_prompt, PROMPT_VERSION
-│   ├── summarizer.py          Claude call wrapper
-│   ├── cache.py               summary_cache integration (input_hash)
-│   └── cleanup.py             retention sweep
+apps/summarization/
+├── config.py                  app settings (loads .env)
+├── summary/                   ── report CLI ──
+│   ├── run.py                 python -m summary.run (reports or --skill)
+│   └── cleanup.py             summary_cache retention sweep
 ├── question/                  ── online Q&A service ──
 │   ├── main.py                FastAPI app (:8003)
 │   ├── orchestrator.py        per-request flow
@@ -60,25 +58,27 @@ Summarization/
 │   ├── generator.py           free-form answer path
 │   ├── schemas/               per-intent JSON Schema + templates
 │   └── templates/             sandboxed Jinja2 engine, filters, functions
-├── shared/                    db.py, llm.py, http.py, formatters.py
-├── audit/                     structured logging to Supabase
+├── shared/                    db.py (question-owned queries), http.py
 ├── scripts/                   SQL + dev tools
 └── output/                    {TICKER}_{YYYY-MM-DD}.md (gitignored)
 ```
 
+Report logic (context, prompt, cache) lives in `libs/research`; the Claude
+client in `libs/common`.
+
 ## Setup
 
-Handled by `./dev.sh setup question` from QuantAgent. Manually:
+Handled by `./dev.sh setup question` from the repo root. Manually:
 
 ```bash
 python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements.txt -e ../../libs/common -e ../../libs/research -e ../../libs/skills
 cp .env.example .env        # then fill in credentials
 ```
 
 Prerequisites: Python 3.11+, a Supabase project with
 `apps/pipeline/pipeline/schema.sql` applied and `pgvector` enabled, a
-Anthropic API key, and a reachable embedding-service on :8002.
+Anthropic API key, and a reachable embedding service on :8002.
 
 ## summary — CLI
 
@@ -101,7 +101,7 @@ no LLM call.
 ```bash
 uvicorn question.main:app --port 8003 --reload
 
-docker build -f Dockerfile.question -t qa-question .
+docker build -f apps/summarization/Dockerfile.question -t qa-question ../..   # repo-root context
 docker run -p 8003:8080 --env-file .env qa-question
 ```
 
@@ -110,18 +110,19 @@ docker run -p 8003:8080 --env-file .env qa-question
 | POST | `/api/ask/stream` | SSE stream of tokens + structured events (`status`, `sources`, `clarification`) |
 | GET | `/health` | Liveness |
 
-Consumed by `QuantAgent/backend/rag.py`.
+Consumed by `apps/backend/rag.py`.
 
 ## Data flow — summary
 
-1. **Fetch** — `fetcher.fetch_context(ticker)` pulls documents, earnings rows
-   and price snapshots.
-2. **Format** — organised into a `TickerContext`. Over `MAX_CONTEXT_CHARS`, news
+All in `research.report.build_report(ticker)`:
+
+1. **Fetch** — `research.context.fetch_context` pulls documents, earnings rows
+   and price snapshots into a `TickerContext`. Over `MAX_CONTEXT_CHARS`, news
    and filings truncate first; earnings and price stay intact.
-3. **Cache check** — `compute_input_hash` over source doc ids + model + prompt
+2. **Cache check** — `compute_input_hash` over source doc ids + model + prompt
    version. Hit → reuse.
-4. **Prompt → generate → save** — Claude with retry, then `output/` and
-   `summary_cache`.
+3. **Generate** — Claude (`LLM_MODEL_SUMMARY`) with retry, then `summary_cache`.
+   The CLI saves the Markdown to `output/`.
 
 ## Data flow — question
 
@@ -133,7 +134,7 @@ Consumed by `QuantAgent/backend/rag.py`.
    recency-aware reranking and optional multi-vector query expansion.
 3. **Structured generation** — for `EARNINGS_ANALYSIS` / `COMPARISON` /
    `PRICE_QUERY`, build context deterministically from DB rows, ask Claude for
-   only the narrative slots (`json_object` mode), render through sandboxed
+   only the narrative slots (structured outputs), render through sandboxed
    Jinja2. **Numbers are computed in `templates/functions.py`, never by the LLM.**
 4. **Free-form fallback** — other intents go through `generator.py`.
 5. **Stream** — tokens and structured events as SSE.
@@ -160,16 +161,13 @@ Everything lives in `config.py`. Required: `SUPABASE_URL`, `SUPABASE_KEY`,
 
 ## Skills integration
 
-`summary/run.py` supports `--skill <name>` to route through the shared
-[Skills](../../libs/skills) framework; the legacy
-`--ticker` path is preserved verbatim. It locates the package by probing
-`<workspace>/Skills` and falling back to the pip-installed distribution.
+`summary/run.py --skill <name>` runs any skill from `libs/skills`.
+`question/` does not call skills — it stays the RAG / structured-intent
+service. Chat-side skill routing lives in `apps/backend/main.py`.
 
-`question/` does not call skills — it stays the RAG / structured-intent service.
-Chat-side skill routing lives in `QuantAgent/backend/main.py`.
-
-The shipped skills call back into this repo's `summary.fetcher` and
-`summary.summarizer`, so "skill in chat" and "CLI report" stay in lockstep.
+`generate_report` and the `--ticker` CLI path both call
+`research.report.build_report`, so "skill in chat" and "CLI report" stay in
+lockstep.
 
 ## Database tables
 
@@ -182,7 +180,7 @@ The shipped skills call back into this repo's `summary.fetcher` and
 | `summary_cache` | summary | Cached reports by input_hash |
 | `audit_log` | both | Structured query/response logging |
 
-We never write to the first four — `data-pipeline` owns them.
+We never write to the first four — `apps/pipeline` owns them.
 
 ## Testing
 
@@ -195,9 +193,8 @@ python scripts/test_t4_router.py           # router only, pure in-memory
 
 ## Related services
 
-| Service | Why this repo cares |
+| Service | Why this app cares |
 |---|---|
-| `embedding-service` (:8002) | `question/` calls it to encode queries before pgvector search |
-| `data-pipeline` | Populates the tables we read. We never write to them. |
-| `QuantAgent/backend` | Calls `question/` over HTTP and embeds skill execution in its chat stream |
-| `Skills` | Hosts `generate_report` and `compare_tickers`, which reuse our fetcher + summarizer |
+| `apps/embedding` (:8002) | `question/` calls it to encode queries before pgvector search |
+| `apps/pipeline` | Populates the tables we read. We never write to them. |
+| `apps/backend` | Calls `question/` over HTTP |

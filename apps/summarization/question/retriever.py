@@ -17,13 +17,10 @@ from config import (
     EXPANSION_TOP_K_PER_QUERY,
 )
 from question.models import Intent, QueryMode, Source
-from shared.db import (
-    get_documents_by_embedding,
-    get_earnings,
-    get_price_snapshots,
-    get_tracked_tickers,
-)
-from shared.formatters import (
+from common.audit import log_api_call
+from research.data import get_earnings, get_price_snapshots
+from shared.db import get_documents_by_embedding, get_tracked_tickers
+from research.formatters import (
     format_news,
     format_filings,
     format_earnings,
@@ -45,7 +42,6 @@ async def _encode_query(query: str) -> list[float]:
     resp.raise_for_status()
     latency = int((time.time() - t0) * 1000)
 
-    from audit import log_api_call
     log_api_call(
         service="question",
         api_type="embedding",
@@ -72,7 +68,6 @@ async def _encode_queries(queries: list[str]) -> list[list[float]]:
     resp.raise_for_status()
     latency = int((time.time() - t0) * 1000)
 
-    from audit import log_api_call
     log_api_call(
         service="question",
         api_type="embedding",

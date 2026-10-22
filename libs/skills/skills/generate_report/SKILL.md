@@ -1,7 +1,7 @@
 # generate_report
 
 Generate a comprehensive investment-analysis report for one or more tickers
-and save it as a Markdown file under `Summarization/output/`.
+and save it as a Markdown file under `$REPORT_OUTPUT_DIR` (default `./output`).
 
 ## When to use
 
@@ -31,5 +31,5 @@ Do **not** use when:
 ## Output
 
 - `content`: the full Markdown report.
-- `artifacts`: `[Path(Summarization/output/{TICKER}_{YYYY-MM-DD}.md)]`.
+- `artifacts`: `[Path($REPORT_OUTPUT_DIR/{TICKER}_{YYYY-MM-DD}.md)]`.
 - `meta`: `{doc_counts, total_chars, cache_hit, input_hash}`.

@@ -1,13 +1,13 @@
 # embedding-service
 
-> Shared vectorization service for the QuantAgent stack.
+> Shared vectorization service for the zeroNoise stack.
 
 Encodes text into 384-dimensional vectors with `all-MiniLM-L6-v2`. Small,
 stateless, and the **only service in the stack that needs no external
 credentials** — which makes it the first thing worth starting when you are
 checking whether your setup works at all.
 
-> Part of the QuantAgent monorepo. Run `./dev.sh` from the repo root — it sets
+> Part of the zeroNoise monorepo. Run `./dev.sh` from the repo root — it sets
 > up this directory's venv and `.env`.
 
 ## Why it is a separate service
@@ -21,7 +21,7 @@ the whole `documents` table.
 
 ## Setup
 
-Handled by `./dev.sh setup embedding` from QuantAgent. Manually:
+Handled by `./dev.sh setup embedding` from the repo root. Manually:
 
 ```bash
 python3 -m venv venv && source venv/bin/activate

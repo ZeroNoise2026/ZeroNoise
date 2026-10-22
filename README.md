@@ -1,4 +1,4 @@
-# QuantAgent
+# zeroNoise
 
 Financial research assistant: daily briefings, watchlist management, RAG-based
 Q&A over SEC filings and news, and on-demand ticker research reports.
@@ -8,8 +8,8 @@ here. `./dev.sh` installs everything and tells you exactly what is still
 missing.
 
 ```bash
-git clone https://github.com/ZeroNoise2026/QuantAgent.git
-cd QuantAgent && ./dev.sh
+git clone https://github.com/ZeroNoise2026/QuantAgent.git zeroNoise
+cd zeroNoise && ./dev.sh
 ```
 
 That one command creates a venv per service, scaffolds every `.env`, and prints
@@ -72,12 +72,13 @@ One repo, several independently deployed services.
 | `apps/summarization` | `summary` CLI (research reports) + `question` service (RAG Q&A) | 8003 |
 | `apps/pipeline` | Ingest Finnhub / SEC EDGAR / FMP → clean → chunk → embed → Supabase | 8001 |
 | `apps/embedding` | all-MiniLM-L6-v2, 384-dim vectors | 8002 |
-| `libs/skills` | Shared skill framework (`generate_report`, `compare_tickers`) | — |
+| `libs/common` | The one Claude client, Supabase client, audit log | — |
+| `libs/research` | Ticker context, report generation, report cache | — |
+| `libs/skills` | Skill framework: registry, LLM router, `generate_report`, `compare_tickers` | — |
 
-**Rule: apps never import each other.** Code that two apps need goes in
-`libs/`. Apps talk to each other only over HTTP. (Known exception, to be
-removed: `libs/skills` still reaches into `apps/summarization` for
-`generate_report` and `compare_tickers`.)
+**Rule: apps never import each other, and libs never import apps.** Code that
+two apps need goes in `libs/`; apps talk to each other only over HTTP.
+`scripts/check_boundaries.py` enforces it in CI and in `./dev.sh test`.
 
 The voice assistant is deliberately **not** in this repo: it is a generic
 module in its own repo (`voiceAI-plugin`) and talks to the backend over HTTP.
@@ -85,20 +86,22 @@ module in its own repo (`voiceAI-plugin`) and talks to the backend over HTTP.
 ## Layout
 
 ```
-QuantAgent/
+zeroNoise/
 ├── dev.sh  deploy.sh         local stack + Cloud Run deploys
 ├── .github/workflows/        CI and scheduled jobs for every app
 ├── docs/                     DEPLOY.md, architecture.html
+├── scripts/                  check_boundaries.py
 ├── libs/
-│   └── skills/               shared skill framework
+│   ├── common/               Claude client, Supabase client, audit log
+│   ├── research/             TickerContext, build_report(), summary_cache
+│   └── skills/               skill framework + built-in skills
 └── apps/
     ├── backend/              FastAPI BFF
     │   ├── main.py           API server; routes skills before falling back to RAG
     │   ├── rag.py            proxies the question-service SSE stream
     │   ├── briefing.py       scheduled daily briefing generator
-    │   ├── summarizer.py     Claude client for summaries + briefings
-    │   ├── fetcher.py        TickerContext assembly from Supabase
-    │   ├── db.py             Supabase data access
+    │   ├── summarizer.py     short summaries + daily briefings
+    │   ├── db.py             user data: watchlist, preferences, briefings, chat
     │   ├── auth.py           Supabase JWT verification
     │   ├── files/            upload, parse and preview (pdf/docx/xlsx/csv/txt)
     │   └── migrations/       SQL migrations

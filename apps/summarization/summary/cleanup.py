@@ -14,7 +14,8 @@ import logging
 import sys
 from datetime import datetime, timedelta, timezone
 
-from config import SUPABASE_URL, SUPABASE_KEY
+import config  # noqa: F401  (loads .env)
+from common import supabase
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,10 +28,9 @@ RETENTION_DAYS = 90
 
 
 def _client():
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    if not supabase.is_configured():
         raise SystemExit("SUPABASE_URL and SUPABASE_KEY must be set")
-    from supabase import create_client
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    return supabase.get_client()
 
 
 def cleanup(dry_run: bool = False, retention_days: int = RETENTION_DAYS) -> int:

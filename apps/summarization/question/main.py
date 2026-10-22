@@ -22,7 +22,7 @@ logging.basicConfig(
 
 app = FastAPI(
     title="question-service",
-    description="RAG-powered real-time Q&A for QuantAgent",
+    description="RAG-powered real-time Q&A",
     version="0.1.0",
 )
 

@@ -1,7 +1,6 @@
 """
-shared/formatters.py
-Data formatting functions — shared by summary and question services.
-Extracted from: summary/fetcher.py (Person B)
+research/formatters.py
+Render market-data rows as prompt-ready text.
 """
 
 

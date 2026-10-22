@@ -1,6 +1,6 @@
 """
 main.py
-FastAPI backend for the ChatbotUI.
+FastAPI backend (BFF) for the web app.
 
 Endpoints:
   GET  /api/tickers              — available tickers for watchlist
@@ -20,29 +20,19 @@ Run:
 
 import logging
 import os
-import sys
-from pathlib import Path
-from fastapi import FastAPI, Header, HTTPException
-from fastapi import Depends, HTTPException
+from typing import Optional
+
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
 
-# Make the shared `skills` package importable from the monorepo checkout
-# (libs/skills/skills/). If it isn't there, the package was pip-installed
-# instead (see libs/skills/pyproject.toml) — that is how the container image
-# gets it.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_skills_repo = _REPO_ROOT / "libs" / "skills"
-if (_skills_repo / "skills" / "__init__.py").is_file() and str(_skills_repo) not in sys.path:
-    sys.path.insert(0, str(_skills_repo))
-
+import config  # noqa: F401  (loads .env before anything reads the environment)
 import db
 import rag
 from auth import get_current_user
-from fetcher import fetch_context
 from files.routes import router as files_router
+from research.context import fetch_context
 from summarizer import generate_summary, generate_briefing
 
 logging.basicConfig(
@@ -68,15 +58,15 @@ except ImportError as _skills_import_err:
     _SKILLS_AVAILABLE = False
     logging.error(
         "skills package unavailable — skill routing is DISABLED and all chat "
-        "will fall back to RAG. For local dev run `pip install -e ../../Skills`; "
-        "for the container make sure requirements.txt installs it. Cause: %s",
+        "will fall back to RAG. For local dev run `./dev.sh setup backend`; "
+        "for the container make sure the Dockerfile installs libs/skills. Cause: %s",
         _skills_import_err,
     )
 else:
     logging.info("skills package loaded — skill routing enabled")
 
 
-app = FastAPI(title="QuantAgent Chat API", version="1.0.0")
+app = FastAPI(title="zeroNoise API", version="1.0.0")
 
 # CORS: in prod set ALLOWED_ORIGINS="https://your-app.vercel.app,https://your-app-*.vercel.app"
 # Defaults to localhost for dev.
@@ -408,7 +398,7 @@ class SummarizeRequest(BaseModel):
 @app.post("/api/summarize")
 def summarize(body: SummarizeRequest, user_id: str = Depends(get_current_user)):
     ticker = body.ticker.upper().strip()
-    ctx = fetch_context(ticker)
+    ctx = fetch_context(ticker, news_limit=100)
     if ctx.total_chars == 0:
         raise HTTPException(status_code=404, detail=f"No data found for {ticker}")
     report = generate_summary(ctx)

@@ -6,11 +6,13 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install deps first for better layer caching. The shared `skills` package is
-# installed from the monorepo checkout, not from git.
+# Install deps first for better layer caching. The shared libs/ packages are
+# installed from the monorepo checkout.
+COPY libs/common /libs/common
+COPY libs/research /libs/research
 COPY libs/skills /libs/skills
 COPY apps/backend/requirements.txt .
-RUN pip install --no-cache-dir /libs/skills -r requirements.txt
+RUN pip install --no-cache-dir /libs/common /libs/research /libs/skills -r requirements.txt
 
 COPY apps/backend/ .
 

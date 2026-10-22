@@ -378,7 +378,7 @@ class QueryRouter:
         On any failure, returns (None, [], None, []) — the caller keeps L1 defaults.
         Cost: ~350 tokens total (system+examples+query+response w/ expansion), ~700ms.
         """
-        from shared.llm import chat, has_api_key
+        from common.llm import chat, has_api_key
         from config import LLM_MODEL_CLASSIFY
 
         if not has_api_key():

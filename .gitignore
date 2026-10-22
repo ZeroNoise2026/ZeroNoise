@@ -1,18 +1,38 @@
+# Secrets and local env
 .env
 .env.local
 .env.*.local
 !.env.example
+.vercel
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 venv/
 .venv/
+env/
+build/
+
+# Node
 node_modules/
 dist/
 .vite/
+
+# Generated reports (summary CLI, generate_report skill)
+output/
+
+# Embedding model cache
+apps/embedding/models/
+
+# Local tooling
+.devstack/
+.deploy/
+.deployrc
+.idea/
+.vscode/
 .DS_Store
 *.log
 ISSUES.md
-.deploy/
-.deployrc
-.devstack/
-*.egg-info/
+.github/copilot-instructions.md
+apps/summarization/scripts/supabase-mcp/

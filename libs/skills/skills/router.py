@@ -15,7 +15,7 @@ or, when no skill fits:
 The chat endpoint uses the latter as the signal to fall back to the
 existing RAG flow.
 
-The call goes through skills._llm, the package's own Claude client.
+The call goes through common.llm, the monorepo's single Claude client.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from skills._llm import chat, has_api_key
+from common.llm import chat, has_api_key
 from skills.registry import all_skill_specs
 
 logger = logging.getLogger("skills.router")
@@ -116,6 +116,7 @@ def _call_router_llm(system_prompt: str, user_message: str) -> str:
         model=_ROUTER_MODEL,
         effort=_ROUTER_EFFORT,
         max_tokens=_ROUTER_MAX_TOKENS,
+        service="skills",
     )
     return content
 

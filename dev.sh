@@ -2,8 +2,8 @@
 #
 # dev.sh — single entry point for the whole stack, in one monorepo.
 #
-#   git clone https://github.com/ZeroNoise2026/QuantAgent.git
-#   cd QuantAgent && ./dev.sh
+#   git clone https://github.com/ZeroNoise2026/QuantAgent.git zeroNoise
+#   cd zeroNoise && ./dev.sh
 #
 # Commands
 #   ./dev.sh                 setup + doctor  (start here; idempotent)
@@ -29,7 +29,9 @@
 #   apps/summarization  question service + summary CLI    (service: question)
 #   apps/pipeline       ingestion + live-lookup API       (service: pipeline)
 #   apps/embedding      embedding API                     (service: embedding)
-#   libs/skills         shared skill framework (library, not a service)
+#   libs/common         Claude client, Supabase client, audit log
+#   libs/research       ticker context, report generation + cache
+#   libs/skills         skill framework: registry, LLM router, built-in skills
 #
 # Rule: apps never import each other. Code two apps need goes in libs/.
 #
@@ -130,6 +132,14 @@ svc_start_cmd() {
     question)  echo "venv/bin/uvicorn question.main:app --port 8003" ;;
     backend)   echo "venv/bin/uvicorn main:app --port 8000" ;;
     frontend)  echo "npm run dev" ;;
+  esac
+}
+# libs/ packages each Python service imports (installed editable by setup).
+svc_libs() {
+  case "$1" in
+    backend)  echo "common research skills" ;;
+    question) echo "common research skills" ;;
+    *)        echo "" ;;
   esac
 }
 is_node_svc() { [ "$1" = "frontend" ]; }
@@ -233,9 +243,13 @@ setup_python_svc() {
     "$venv/bin/python" -m pip install --quiet -r "$dir/requirements.txt"
   fi
   # libs/ packages install editable, so edits take effect without a reinstall.
-  if [ "$svc" = "backend" ]; then
-    "$venv/bin/python" -m pip install --quiet -e "$ROOT/libs/skills"
-    info "$svc: skills installed editable from libs/skills"
+  local libs; libs="$(svc_libs "$svc")"
+  if [ -n "$libs" ]; then
+    local lib args=""
+    for lib in $libs; do args="$args -e $ROOT/libs/$lib"; done
+    # shellcheck disable=SC2086
+    "$venv/bin/python" -m pip install --quiet $args
+    info "$svc: libs installed editable ($libs)"
   fi
   ok "$svc: python deps ready"
   scaffold_env "$svc"
@@ -259,16 +273,16 @@ cmd_setup() {
     if is_node_svc "$s"; then setup_frontend; else setup_python_svc "$s"; fi
   done
   secrets_apply
-  # libs/skills is a library, not a service, but its offline suite is the
-  # fastest proof the codebase is intact — give it a venv too. Non-fatal.
-  local sk="$ROOT/libs/skills"
-  if [ ! -x "$sk/venv/bin/python" ]; then
-    if python3 -m venv "$sk/venv" \
-       && "$sk/venv/bin/python" -m pip install --quiet --upgrade pip >/dev/null \
-       && "$sk/venv/bin/python" -m pip install --quiet -e "$sk"; then
-      ok "libs/skills: venv ready (editable install)"
+  # libs/ is not a service, but its offline suites are the fastest proof the
+  # codebase is intact — give it one shared venv. Non-fatal.
+  local lv="$ROOT/libs/venv"
+  if [ ! -x "$lv/bin/python" ]; then
+    if python3 -m venv "$lv" \
+       && "$lv/bin/python" -m pip install --quiet --upgrade pip >/dev/null \
+       && "$lv/bin/python" -m pip install --quiet -e "$ROOT/libs/common" -e "$ROOT/libs/research" -e "$ROOT/libs/skills"; then
+      ok "libs: venv ready (editable install)"
     else
-      warn "libs/skills: editable install failed — ./dev.sh test will skip the smoke suite"
+      warn "libs: editable install failed — ./dev.sh test will skip the libs suites"
     fi
   fi
 }
@@ -319,11 +333,15 @@ cmd_doctor() {
 cmd_test() {
   head1 "OFFLINE SUITES (no credentials)"
   local rc=0
-  if [ -x "$ROOT/libs/skills/venv/bin/python" ]; then
+  if [ -x "$ROOT/libs/venv/bin/python" ]; then
     say "  skills smoke suite:"
-    ( cd "$ROOT/libs/skills" && ./venv/bin/python -m skills.tests.test_smoke ) || rc=1
+    ( cd "$ROOT/libs/skills" && "$ROOT/libs/venv/bin/python" -m skills.tests.test_smoke ) || rc=1
   else
-    warn "libs/skills venv missing -> ./dev.sh setup"; rc=1
+    warn "libs venv missing -> ./dev.sh setup"; rc=1
+  fi
+  if [ -x "$ROOT/apps/summarization/venv/bin/python" ]; then
+    say ""; say "  summarization tests:"
+    ( cd "$ROOT/apps/summarization" && ./venv/bin/python -m pytest -q tests ) || rc=1
   fi
   say ""; say "  module boundaries:"
   python3 "$ROOT/scripts/check_boundaries.py" || rc=1
@@ -337,7 +355,7 @@ ensure_secrets_file() {
   [ -f "$SECRETS_FILE" ] && return 0
   mkdir -p "$(dirname "$SECRETS_FILE")"
   ( umask 077
-    { echo "# QuantAgent central secrets — the ONLY place to edit credentials."
+    { echo "# zeroNoise central secrets — the ONLY place to edit credentials."
       echo "# Copied into each service .env by ./dev.sh secrets apply."
       for k in $SHARED_KEYS; do echo "$k="; done
     } > "$SECRETS_FILE" )

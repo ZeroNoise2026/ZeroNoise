@@ -3,26 +3,24 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "quantagent-skills"
+name = "zeronoise-skills"
 version = "0.1.0"
-description = "Shared skill framework for the QuantAgent project"
+description = "Shared skill framework: registry, LLM router, built-in skills"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-    "anthropic>=2.1.0",
-]
+# Also needs libs/common and libs/research (installed alongside it; not listed
+# because they are local paths, not published packages).
+dependencies = []
 
 [project.optional-dependencies]
-# Only needed by skills/tests/test_live_router.py, which reads Summarization/.env
+# Only needed by skills/tests/test_live_router.py, which reads the central secrets file
 dev = [
     "python-dotenv>=1.0",
 ]
 
 [tool.setuptools]
-# The importable package lives in skills/ — a real, git-tracked directory.
-# This is deliberate: the package name must not depend on what the clone
-# folder happens to be called. `git clone .../Skills.git` produces "Skills",
-# which does not match `import skills` on a case-sensitive filesystem.
+# The importable package is the tracked skills/ directory, so `import skills`
+# resolves the same way on case-sensitive filesystems (Linux, Docker, CI).
 packages = [
     "skills",
     "skills.compare_tickers",

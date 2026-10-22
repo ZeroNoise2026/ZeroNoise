@@ -149,10 +149,8 @@ ever found and hammered.
   Installing from `https://download.pytorch.org/whl/cpu` and baking the model in
   at build time would cut the image by an order of magnitude and take the cold
   start from ~60s to a few seconds.
-- **The daily briefing is not running anywhere.** `daily-briefing.yml` and
-  `summary-cleanup.yml` live in the untracked workspace root, not in any git
-  repo, so GitHub has never executed them — and they still reference the old
-  `ChatbotUI/backend` path. They need to move into this repo's `.github/workflows/`,
-  or become Cloud Scheduler → Cloud Run Jobs.
-- **Ingestion is not scheduled in the cloud.** `data-pipeline/.github/workflows/ingest.yml`
+- **The daily briefing is not running anywhere.** There is no workflow for
+  `apps/backend/briefing.py`; it needs an hourly `.github/workflows/` job or a
+  Cloud Scheduler → Cloud Run Job.
+- **Ingestion is not scheduled in the cloud.** `.github/workflows/pipeline-ingest.yml`
   is `workflow_dispatch` only.

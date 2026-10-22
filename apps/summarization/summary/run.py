@@ -1,36 +1,24 @@
 """
 summary/run.py
-Main entry point for the Summarization service.
+Report CLI: generate research reports for tickers, or run any skill.
 
 Usage:
     python -m summary.run --ticker AAPL
     python -m summary.run --ticker AAPL,MSFT,NVDA
     python -m summary.run --all
     python -m summary.run --ticker AAPL --dry-run
+    python -m summary.run --skill compare_tickers --args '{"tickers":["AAPL","MSFT"]}'
+    python -m summary.run --list-skills
 """
 
 import argparse
 import json
 import logging
 import sys
-from datetime import date
-from pathlib import Path
 
-from config import OUTPUT_DIR, LLM_MODEL_SUMMARY
-from summary.fetcher import fetch_context
-from summary.summarizer import generate_summary
-from summary.prompts import PROMPT_VERSION
-from summary.cache import compute_input_hash, get_cached, put_cached
+from config import OUTPUT_DIR
+from research.report import NoDataError, build_report
 from shared.db import get_tracked_tickers
-
-# Make the shared `skills` package importable from the monorepo checkout
-# (libs/skills/skills/). If it isn't there, the package was pip-installed
-# instead (see libs/skills/pyproject.toml) — that is how the container image
-# gets it.
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_skills_repo = _REPO_ROOT / "libs" / "skills"
-if (_skills_repo / "skills" / "__init__.py").is_file() and str(_skills_repo) not in sys.path:
-    sys.path.insert(0, str(_skills_repo))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,75 +28,27 @@ logging.basicConfig(
 logger = logging.getLogger("run")
 
 
-def save_report(ticker: str, content: str) -> Path:
-    today = date.today().isoformat()
-    path = OUTPUT_DIR / f"{ticker}_{today}.md"
-    path.write_text(content, encoding="utf-8")
-    return path
-
-
 def process_ticker(ticker: str, dry_run: bool = False) -> bool:
-    """Fetch data, generate summary, and save report. Returns True on success.
-
-    Caching: keyed on input_hash = SHA256(sorted source doc IDs + model +
-    prompt_version). Identical inputs reuse the cached summary instead of
-    re-calling the LLM.
-    """
+    """Build one report (cached or fresh) and save it. Returns True on success."""
     try:
-        ctx = fetch_context(ticker)
-
-        if ctx.total_chars == 0:
-            logger.warning(f"No data found for {ticker}, skipping.")
-            return False
-
-        input_hash = compute_input_hash(ctx, LLM_MODEL_SUMMARY, PROMPT_VERSION)
-
-        if dry_run:
-            logger.info(
-                f"[dry-run] {ticker}: {ctx.doc_counts}, {ctx.total_chars:,} chars, "
-                f"input_hash={input_hash[:12]}..."
-            )
-            return True
-
-        # 1) Try cache
-        cached = get_cached(ticker, input_hash)
-        if cached is not None:
-            logger.info(
-                f"Cache HIT for {ticker} (hash={input_hash[:12]}..., "
-                f"originally generated {cached.summary_date})"
-            )
-            header = f"# {ticker} Investment Analysis Report\n\n"
-            header += f"> Generated on {cached.summary_date.isoformat()} (cached)\n"
-            header += f"> Data: {ctx.doc_counts}\n\n"
-            path = save_report(ticker, header + cached.content)
-            logger.info(f"Report saved from cache: {path}")
-            return True
-
-        # 2) Miss — call the LLM
-        logger.info(f"Cache MISS for {ticker} (hash={input_hash[:12]}...) — calling LLM")
-        report = generate_summary(ctx)
-
-        # 3) Write back to cache (best-effort, won't raise)
-        put_cached(
-            ticker=ticker,
-            input_hash=input_hash,
-            content=report,
-            model=LLM_MODEL_SUMMARY,
-            prompt_version=PROMPT_VERSION,
-            source_doc_ids=ctx.source_doc_ids,
-        )
-
-        header = f"# {ticker} Investment Analysis Report\n\n"
-        header += f"> Generated on {date.today().isoformat()}\n"
-        header += f"> Data: {ctx.doc_counts}\n\n"
-
-        path = save_report(ticker, header + report)
-        logger.info(f"Report saved: {path}")
-        return True
-
+        report = build_report(ticker, dry_run=dry_run)
+    except NoDataError as e:
+        logger.warning(str(e))
+        return False
     except Exception as e:
         logger.error(f"Failed to process {ticker}: {e}", exc_info=True)
         return False
+
+    if dry_run:
+        logger.info(
+            f"[dry-run] {report.ticker}: {report.doc_counts}, {report.total_chars:,} chars, "
+            f"input_hash={report.input_hash[:12]}..."
+        )
+        return True
+
+    path = report.save(OUTPUT_DIR)
+    logger.info(f"Report saved{' from cache' if report.cache_hit else ''}: {path}")
+    return True
 
 
 def _parse_skill_args(raw: str | None) -> dict:
@@ -141,7 +81,7 @@ def _parse_skill_args(raw: str | None) -> dict:
 
 def run_skill(name: str, args: dict) -> bool:
     """Dispatch to the skills/ framework. Returns True on success."""
-    from skills import get_skill  # local import: skills/ may live outside venv
+    from skills import get_skill
     try:
         skill = get_skill(name)
     except KeyError as e:
@@ -195,7 +135,7 @@ def main():
         ok = run_skill(args.skill, skill_args)
         sys.exit(0 if ok else 1)
 
-    # ── original CLI behavior (unchanged) ──
+    # ── reports ──
     if args.all:
         rows = get_tracked_tickers(active_only=True)
         tickers = [r["ticker"] for r in rows]
@@ -203,20 +143,10 @@ def main():
     else:
         tickers = [t.strip().upper() for t in args.ticker.split(",")]
 
-    results = {"success": [], "failed": [], "skipped": []}
-
-    for ticker in tickers:
-        ok = process_ticker(ticker, dry_run=args.dry_run)
-        if ok:
-            results["success"].append(ticker)
-        else:
-            results["failed"].append(ticker)
-
+    failed = [t for t in tickers if not process_ticker(t, dry_run=args.dry_run)]
     logger.info("=" * 50)
-    s, f = results["success"], results["failed"]
-    logger.info(f"Done. Success: {s}, Failed: {f}")
-
-    if results["failed"]:
+    logger.info(f"Done. Success: {[t for t in tickers if t not in failed]}, Failed: {failed}")
+    if failed:
         sys.exit(1)
 
 

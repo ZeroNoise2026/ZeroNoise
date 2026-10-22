@@ -15,7 +15,7 @@ from sentence_transformers import SentenceTransformer
 from app.config import EMBEDDING_MODEL, EMBEDDING_DIM
 
 app = FastAPI(
-    title="QuantAgent Embedding Service",
+    title="Embedding Service",
     description="Shared text → vector service (all-MiniLM-L6-v2, 384 dim)",
     version="0.1.0",
 )

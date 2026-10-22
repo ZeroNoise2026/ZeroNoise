@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 from config import BRIEFING_WINDOW_MINUTES
 from db import get_users_needing_briefing, briefing_exists, upsert_briefing
-from fetcher import fetch_context
+from research.context import fetch_context
 from summarizer import generate_briefing
 
 logging.basicConfig(

@@ -1,7 +1,7 @@
-"""Smoke test: ChatbotUI's /api/chat/stream proxies the upstream `sources`
+"""Smoke test: the backend's /api/chat/stream proxies the upstream `sources`
 event to the client AND persists the items via append_chat_message.
 
-Run from ChatbotUI/backend/:
+Run from apps/backend/:
     python -m tests.test_chat_stream_sources
 """
 import os
@@ -16,8 +16,11 @@ from fastapi.testclient import TestClient
 import db as db_mod
 import rag as rag_mod
 import main as main_mod
+from auth import get_current_user
 
-
+# Requests authenticate with a Supabase JWT; bypass verification and act as a
+# fixed user so the test exercises only the streaming/persistence path.
+main_mod.app.dependency_overrides[get_current_user] = lambda: "u-1"
 client = TestClient(main_mod.app)
 
 
@@ -70,7 +73,6 @@ def test_sources_event_proxied_and_persisted():
     resp = client.post(
         "/api/chat/stream",
         json={"question": "How is AAPL?"},
-        headers={"X-User-Id": "u-1"},
     )
     assert resp.status_code == 200
     body = resp.text
@@ -102,7 +104,6 @@ def test_no_sources_event_persists_none():
     resp = client.post(
         "/api/chat/stream",
         json={"question": "what?"},
-        headers={"X-User-Id": "u-2"},
     )
     assert resp.status_code == 200
     assistant = [m for m in captured["appended"] if m["role"] == "assistant"]

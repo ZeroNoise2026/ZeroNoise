@@ -1,25 +1,21 @@
 """
-summary/fetcher.py
-Extracts data from Supabase and assembles structured context for each ticker.
-Formatting helpers live in shared/formatters.py — we call the shared version here.
+research/context.py
+Assemble everything known about a ticker (news, regulatory, filings,
+earnings, prices) into one prompt-ready TickerContext.
 """
 
 import logging
+import os
 from dataclasses import dataclass, field
 
-from shared.db import (
-    get_documents_by_ticker,
-    get_earnings,
-    get_price_snapshots,
-)
-from shared.formatters import (
+from research.data import get_documents_by_ticker, get_earnings, get_price_snapshots
+from research.formatters import (
     format_news,
     format_regulatory,
     format_filings,
     format_earnings,
     format_prices,
 )
-from config import MAX_CONTEXT_CHARS
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +34,7 @@ class TickerContext:
     # "regulatory:<doc_id>", "earnings_doc:<doc_id>",
     # "earnings_row:<ticker>:<quarter>", "price:<ticker>:<date>", ...].
     # Always sorted for deterministic hashing.
-    # Invariant: documents.id is a SHA256 of content (see data-pipeline), so
+    # Invariant: documents.id is a SHA256 of content (see apps/pipeline), so
     # same id => same content; we never need to hash the text bodies.
     source_doc_ids: list[str] = field(default_factory=list)
 
@@ -67,10 +63,10 @@ def _truncate_to_budget(ctx: TickerContext, budget: int) -> TickerContext:
     return ctx
 
 
-def fetch_context(ticker: str) -> TickerContext:
+def fetch_context(ticker: str, news_limit: int = 30) -> TickerContext:
     """Fetch all relevant data from Supabase and assemble into TickerContext."""
     logger.info(f"Fetching data for {ticker}...")
-    news_docs = get_documents_by_ticker(ticker, doc_type="news", limit=30)
+    news_docs = get_documents_by_ticker(ticker, doc_type="news", limit=news_limit)
     regulatory_docs = get_documents_by_ticker(ticker, doc_type="regulatory", limit=30)
     filing_docs = (
         get_documents_by_ticker(ticker, doc_type="10-K", limit=50)
@@ -114,6 +110,7 @@ def fetch_context(ticker: str) -> TickerContext:
         },
         source_doc_ids=source_doc_ids,
     )
-    ctx = _truncate_to_budget(ctx, MAX_CONTEXT_CHARS)
+    # Prompt budget per ticker, in characters. News is trimmed first, then filings.
+    ctx = _truncate_to_budget(ctx, int(os.getenv("MAX_CONTEXT_CHARS", "380000")))
     logger.info(f"  {ticker}: {ctx.doc_counts} | context chars: {ctx.total_chars:,}")
     return ctx

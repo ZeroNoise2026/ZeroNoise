@@ -17,13 +17,13 @@ import os
 import sys
 from pathlib import Path
 
-# Pull ANTHROPIC_API_KEY from Summarization/.env (the canonical project env)
+# Pull ANTHROPIC_API_KEY from the central secrets file that ./dev.sh manages.
 try:
     from dotenv import load_dotenv
 except ImportError:
     print("python-dotenv not installed; assuming env is already loaded")
 else:
-    env_path = Path(__file__).resolve().parents[4] / "apps" / "summarization" / ".env"
+    env_path = Path(os.getenv("QUANT_SECRETS_FILE", Path.home() / ".config/quantagent/secrets.env"))
     if env_path.exists():
         load_dotenv(env_path)
 

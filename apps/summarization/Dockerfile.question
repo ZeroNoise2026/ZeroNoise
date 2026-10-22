@@ -1,14 +1,18 @@
+# question service (RAG Q&A). Build context is the REPO ROOT so the image can
+# install the shared libs/ packages:
+#   docker build -f apps/summarization/Dockerfile.question .
 FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY libs/common /libs/common
+COPY libs/research /libs/research
+COPY apps/summarization/requirements.txt .
+RUN pip install --no-cache-dir /libs/common /libs/research -r requirements.txt
 
-COPY config.py .
-COPY shared/ shared/
-COPY audit/ audit/
-COPY question/ question/
+COPY apps/summarization/config.py .
+COPY apps/summarization/shared/ shared/
+COPY apps/summarization/question/ question/
 
 # Cloud Run sets $PORT (default 8080). Locally override with -e PORT=8003.
 ENV PORT=8080

@@ -1,9 +1,9 @@
 """
-audit/logger.py
-Fire-and-forget audit logging to Supabase api_audit_log table.
+common/audit.py
+Fire-and-forget audit logging to the Supabase api_audit_log table.
 
 Usage:
-    from audit import log_api_call
+    from common.audit import log_api_call
 
     log_api_call(
         service="question",
@@ -24,29 +24,11 @@ Usage:
 """
 
 import logging
-import threading
 from typing import Any, Optional
 
+from common import supabase
+
 logger = logging.getLogger(__name__)
-
-# Lazy-init Supabase client (avoid import-time side effects)
-_client = None
-_lock = threading.Lock()
-
-
-def _get_client():
-    """Lazy singleton — same pattern as shared/db.py."""
-    global _client
-    if _client is None:
-        with _lock:
-            if _client is None:
-                from config import SUPABASE_URL, SUPABASE_KEY
-                from supabase import create_client
-                if SUPABASE_URL and SUPABASE_KEY:
-                    _client = create_client(SUPABASE_URL, SUPABASE_KEY)
-                else:
-                    logger.warning("Supabase not configured — audit logging disabled")
-    return _client
 
 
 def log_api_call(
@@ -63,9 +45,9 @@ def log_api_call(
 ) -> None:
     """Write one audit row to api_audit_log. Fire-and-forget, never raises."""
     try:
-        client = _get_client()
-        if client is None:
+        if not supabase.is_configured():
             return
+        client = supabase.get_client()
 
         row: dict[str, Any] = {
             "service": service,

@@ -1,8 +1,8 @@
 """
-summary/cache.py
-DB-backed cache for generated investment summaries.
+research/cache.py
+DB-backed cache for generated investment reports.
 
-Schema: see data-pipeline/pipeline/schema.sql `summary_cache`.
+Schema: see apps/pipeline/pipeline/schema.sql `summary_cache`.
 Key idea: input_hash = SHA256(sorted source doc IDs + model + prompt_version),
 so an identical input always hits the cache without re-calling the LLM.
 
@@ -24,7 +24,8 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Optional
 
-from summary.fetcher import TickerContext
+from common import supabase
+from research.context import TickerContext
 
 logger = logging.getLogger(__name__)
 
@@ -67,12 +68,8 @@ def compute_input_hash(
 
 
 def _client():
-    """Lazy Supabase client — same pattern as shared/db.py and audit/logger.py."""
-    from config import SUPABASE_URL, SUPABASE_KEY
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return None
-    from supabase import create_client
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    """Shared Supabase client, or None when Supabase isn't configured."""
+    return supabase.get_client() if supabase.is_configured() else None
 
 
 def get_cached(ticker: str, input_hash: str) -> Optional[CachedSummary]:

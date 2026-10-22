@@ -1,12 +1,12 @@
 # data-pipeline
 
-> Data ingestion, cleaning, embedding and storage for the QuantAgent stack.
+> Data ingestion, cleaning, embedding and storage for the zeroNoise stack.
 
 Pulls raw financial data from Finnhub, SEC EDGAR and FMP; cleans and chunks it;
 calls `embedding-service` to vectorize; writes to Supabase. Also exposes a small
 FastAPI layer for ad-hoc live lookups the other services hit directly.
 
-> Part of the QuantAgent monorepo. Run `./dev.sh` from the repo root — it sets
+> Part of the zeroNoise monorepo. Run `./dev.sh` from the repo root — it sets
 > up this directory's venv and `.env`.
 
 > **For PMs / analysts:** this is the upstream pipeline that keeps Supabase
@@ -38,7 +38,7 @@ FastAPI layer for ad-hoc live lookups the other services hit directly.
            │
    ┌─ documents ─ earnings ─ price_snapshot ─ tracked_tickers ─┐
    └─────────────── Supabase (pgvector) ───────────────────────┘
-           ▲  read-only from Summarization + QuantAgent
+           ▲  read-only from apps/summarization, apps/backend, libs/research
 ```
 
 ## Layout
@@ -62,7 +62,7 @@ data-pipeline/
 
 ## Setup
 
-Handled by `./dev.sh setup pipeline` from QuantAgent. Manually:
+Handled by `./dev.sh setup pipeline` from the repo root. Manually:
 
 ```bash
 python3 -m venv venv && source venv/bin/activate
@@ -138,31 +138,31 @@ table in the project, not just the ones we write.
 - **Owned here (we are the writer):** `documents`, `earnings`, `price_snapshot`,
   `tracked_tickers`, `summary_cache` (written by Summarization, DDL lives here).
 - **Owned elsewhere:** `user_watchlist`, `user_preferences`, `daily_briefings`,
-  `chat_sessions`, `chat_messages` — QuantAgent is the writer; the DDL lives
+  `chat_sessions`, `chat_messages` — apps/backend is the writer; the DDL lives
   here to keep the schema in one place.
 
 `documents.id` is a SHA256 of the cleaned chunk text, so identical content always
-maps to the same id. Summarization's cache key relies on that stability, and the
-eval suite relies on it for reproducible source ids.
+maps to the same id. The report cache key (libs/research) relies on that
+stability.
 
 ## Skills integration
 
-This repo does **not** call into `Skills`. Ingestion is upstream of any
+This app does **not** call into `libs/skills`. Ingestion is upstream of any
 user-facing capability; the flow direction is strictly:
 
 ```
-data-pipeline → Supabase → {Summarization, QuantAgent, Skills}
+apps/pipeline → Supabase → {apps/summarization, apps/backend, libs/research}
 ```
 
 That said, the schema choices here — especially `documents.id = SHA256(content)`
 and the cache lineage in `summary_cache` — are what make skill behaviour
 reproducible. Changing the DDL means follow-up work in
-`Summarization/summary/cache.py`.
+`libs/research/research/cache.py`.
 
 ## Related services
 
 | Service | Why this repo cares |
 |---|---|
-| `embedding-service` (:8002) | We POST every chunk batch to `/api/encode` |
-| `Summarization` | Reads `documents`, `earnings`, `price_snapshot`; writes only `summary_cache` |
-| `QuantAgent` | Reads the same tables; writes only per-user tables |
+| `apps/embedding` (:8002) | We POST every chunk batch to `/api/encode` |
+| `apps/summarization` + `libs/research` | Read `documents`, `earnings`, `price_snapshot`; write only `summary_cache` |
+| `apps/backend` | Reads the same tables; writes only per-user tables |

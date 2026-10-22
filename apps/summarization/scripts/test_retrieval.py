@@ -36,7 +36,8 @@ import httpx
 from question.router import router
 from question.retriever import _encode_query, semantic_search, structured_lookup, retrieve
 from question.models import Intent, QueryMode
-from shared.db import get_documents_by_embedding, get_earnings, get_price_snapshots
+from research.data import get_earnings, get_price_snapshots
+from shared.db import get_documents_by_embedding
 
 # ── Logging → both console + file ──
 log_path = str(Path(__file__).resolve().parent / "test_retrieval.log")

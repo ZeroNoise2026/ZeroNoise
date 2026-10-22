@@ -15,7 +15,7 @@ import time
 from config import HOT_PROMOTION_THRESHOLD
 from shared.db import is_tracked, is_ingested, promote_ticker
 from shared.db import record_ticker_query, count_recent_ticker_queries
-from shared.db import get_earnings, get_price_snapshots
+from research.data import get_earnings, get_price_snapshots
 from question.models import AskRequest, Intent, QueryMode, Source
 from question.router import router
 from question.retriever import retrieve

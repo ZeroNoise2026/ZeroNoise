@@ -7,7 +7,8 @@ via data-pipeline:8001 API.
 import logging
 import time
 
-from shared.formatters import format_news, format_earnings, format_prices
+from common.audit import log_api_call
+from research.formatters import format_news, format_earnings, format_prices
 from shared.http import get_pipeline_client
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,6 @@ async def fetch_tier2_context(ticker: str) -> str:
         parts.append(f"### {ticker} Latest News\n\n{news}")
 
     status = "ok" if parts else "error"
-    from audit import log_api_call
     log_api_call(
         service="question",
         api_type=",".join(api_types) or "finnhub,fmp",

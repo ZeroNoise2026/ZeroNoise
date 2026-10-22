@@ -19,14 +19,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 APPS = sorted(p.name for p in (ROOT / "apps").iterdir() if p.is_dir())
 
-# Known violations being paid down. Each entry: (file relative to ROOT, target app).
-ALLOWLIST = {
-    ("libs/skills/skills/generate_report/skill.py", "summarization"),
-    ("libs/skills/skills/compare_tickers/skill.py", "summarization"),
-    ("libs/skills/skills/tests/test_smoke.py", "summarization"),
-    ("libs/skills/skills/tests/test_live_router.py", "summarization"),
-}
-
 IMPORT_RE = re.compile(r"^\s*(?:from|import)\s+apps\.(\w+)", re.MULTILINE)
 PATH_RE = re.compile(r"""["']apps["']\s*\)?\s*/\s*["'](\w+)["']|["']apps/(\w+)""")
 SKIP_DIRS = {"venv", ".venv", "node_modules", "__pycache__"}
@@ -50,7 +42,7 @@ def main() -> int:
             targets = {m for m in IMPORT_RE.findall(text)}
             targets |= {a or b for a, b in PATH_RE.findall(text)}
             for target in sorted(targets & set(APPS)):
-                if target == me or (rel, target) in ALLOWLIST:
+                if target == me:
                     continue
                 violations.append(f"{rel} reaches into apps/{target}")
 
@@ -59,7 +51,7 @@ def main() -> int:
     if violations:
         print("\nApps never import each other; libs never import apps. Move shared code to libs/.")
         return 1
-    print(f"✓ boundaries ok ({len(ALLOWLIST)} allowlisted exception(s) still to remove)")
+    print("✓ boundaries ok")
     return 0
 
 

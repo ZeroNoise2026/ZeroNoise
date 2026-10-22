@@ -1,18 +1,11 @@
 """
 summarizer.py
-Claude API client for on-demand summarization and daily briefing generation.
+Short on-demand ticker summaries and multi-ticker daily briefings.
 """
 
-import logging
-import time
-
-import anthropic
-
-from config import ANTHROPIC_API_KEY, LLM_MODEL, LLM_EFFORT
-from fetcher import TickerContext
-
-logger = logging.getLogger(__name__)
-_client = None
+from common.llm import chat
+from config import LLM_EFFORT, LLM_MODEL
+from research.context import TickerContext
 
 SUMMARY_SYSTEM_PROMPT = """You are a senior financial analyst skilled at synthesizing multi-source financial data into concise investment summaries.
 
@@ -42,53 +35,17 @@ Requirements:
 5. If no meaningful data exists for a ticker, note it briefly and move on"""
 
 
-def _get_client() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        if not ANTHROPIC_API_KEY:
-            raise ValueError("ANTHROPIC_API_KEY is not set")
-        # Retries are handled in _call_llm; disable SDK retries to avoid compounding.
-        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, max_retries=0)
-    return _client
-
-
-def _call_llm(system_prompt: str, user_prompt: str, max_retries: int = 3) -> str:
-    client = _get_client()
-    total_chars = len(system_prompt) + len(user_prompt)
-    model = LLM_MODEL
-
-    logger.info(f"  LLM call: model={model}, prompt ~{total_chars:,} chars")
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            # Current Claude models reject non-default temperature; effort is the
-            # depth knob. max_tokens includes thinking tokens.
-            response = client.messages.create(
-                model=model,
-                max_tokens=16000,
-                system=[{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}],
-                messages=[{"role": "user", "content": user_prompt}],
-                output_config={"effort": LLM_EFFORT},
-            )
-            usage = response.usage
-            logger.info(f"  LLM done: model={model}, prompt={usage.input_tokens}, completion={usage.output_tokens}")
-            if response.stop_reason == "refusal":
-                raise RuntimeError(f"{model} declined the request (stop_reason=refusal)")
-            return "".join(b.text for b in response.content if b.type == "text")
-
-        except anthropic.RateLimitError as e:
-            wait = min(2 ** attempt * 10, 60)
-            logger.warning(f"  Rate limited (attempt {attempt}/{max_retries}), waiting {wait}s: {e}")
-            time.sleep(wait)
-        except (anthropic.APITimeoutError, anthropic.APIConnectionError, anthropic.InternalServerError) as e:
-            wait = 2 ** attempt * 5
-            logger.warning(f"  Connection issue (attempt {attempt}/{max_retries}), retrying in {wait}s: {e}")
-            time.sleep(wait)
-        except Exception as e:
-            logger.error(f"  Unexpected error: {e}")
-            raise
-
-    raise RuntimeError(f"LLM call failed after {max_retries} attempts")
+def _call_llm(system_prompt: str, user_prompt: str) -> str:
+    content, _usage = chat(
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        model=LLM_MODEL,
+        effort=LLM_EFFORT,
+        service="backend",
+    )
+    return content
 
 
 def generate_summary(ctx: TickerContext) -> str:

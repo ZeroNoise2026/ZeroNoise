@@ -1,7 +1,6 @@
-# Shared (Supabase + Claude)
-supabase
+# Also needs libs/common and libs/research (and libs/skills for `--skill`);
+# dev.sh and the Dockerfiles install them from the monorepo checkout.
 python-dotenv
-anthropic>=2.1.0
 
 # question service
 fastapi==0.104.1
@@ -10,3 +9,6 @@ pydantic==2.5.0
 httpx>=0.27.0
 jinja2
 jsonschema
+
+# tests
+pytest

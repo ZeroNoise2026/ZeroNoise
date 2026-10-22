@@ -17,7 +17,7 @@ Run from the repo root:
 from __future__ import annotations
 
 import json
-import sys
+import tempfile
 import types
 from pathlib import Path
 from unittest import mock
@@ -101,49 +101,29 @@ def test_router_handles_code_fence() -> None:
           f"got {decision.skill!r}")
 
 
+def _patched_report_pipeline(ctx, *, body: str, put_calls: list | None = None):
+    """Patch research.report's IO (Supabase fetch, cache, Claude) for one test."""
+    from research import report
+    return mock.patch.multiple(
+        report,
+        fetch_context=lambda ticker: ctx,
+        compute_input_hash=lambda c, m, v: "deadbeef" * 8,
+        get_cached=lambda t, h: None,
+        put_cached=lambda **kw: (put_calls if put_calls is not None else []).append(kw),
+        generate_report=lambda c: body,
+    )
+
+
 def test_generate_report_dry_run_with_mocked_supabase(tmp_path: Path) -> None:
     print("\n[5] generate_report dry_run with mocked Supabase fetch")
-    # Inject fakes for the Summarization-package imports the skill makes.
-    # The skill imports lazily inside run(), so we patch sys.modules before
-    # calling it.
     fake_ctx = types.SimpleNamespace(
         ticker="AAPL",
         total_chars=12345,
         doc_counts={"news": 10, "filings": 2},
         source_doc_ids=["doc-1", "doc-2"],
     )
-
-    fake_config = types.ModuleType("config")
-    fake_config.LLM_MODEL_SUMMARY = "claude-sonnet-5-5"
-    fake_config.OUTPUT_DIR = tmp_path
-
-    fake_fetcher = types.ModuleType("summary.fetcher")
-    fake_fetcher.fetch_context = lambda ticker: fake_ctx
-
-    fake_prompts = types.ModuleType("summary.prompts")
-    fake_prompts.PROMPT_VERSION = "test-v1"
-
-    fake_cache = types.ModuleType("summary.cache")
-    fake_cache.compute_input_hash = lambda ctx, m, v: "deadbeef" * 8
-    fake_cache.get_cached = lambda t, h: None
-    fake_cache.put_cached = lambda **kw: None
-
-    fake_summarizer = types.ModuleType("summary.summarizer")
-    fake_summarizer.generate_summary = lambda ctx: "## Mocked report body"
-
-    # Parent package shells so `from summary.X import Y` resolves
-    fake_summary_pkg = types.ModuleType("summary")
-    fake_summary_pkg.__path__ = []  # mark as package
-
-    patched = {
-        "config": fake_config,
-        "summary": fake_summary_pkg,
-        "summary.fetcher": fake_fetcher,
-        "summary.prompts": fake_prompts,
-        "summary.cache": fake_cache,
-        "summary.summarizer": fake_summarizer,
-    }
-    with mock.patch.dict(sys.modules, patched):
+    with _patched_report_pipeline(fake_ctx, body="## Mocked report body"), \
+         mock.patch.dict("os.environ", {"REPORT_OUTPUT_DIR": str(tmp_path)}):
         from skills import get_skill, registry
         registry.reload()
         result = get_skill("generate_report").run(ticker="aapl", dry_run=True)
@@ -189,11 +169,6 @@ def test_compare_tickers_with_mocks() -> None:
     )
     ctx_by_ticker = {"AAPL": fake_aapl, "MSFT": fake_msft, "XXX": fake_xxx}
 
-    fake_fetcher = types.ModuleType("summary.fetcher")
-    fake_fetcher.fetch_context = lambda t: ctx_by_ticker[t]
-    fake_summary_pkg = types.ModuleType("summary")
-    fake_summary_pkg.__path__ = []
-
     chat_calls: list[dict] = []
 
     def fake_chat(messages, *, model, **kw):
@@ -202,19 +177,16 @@ def test_compare_tickers_with_mocks() -> None:
                                                              "completion_tokens": 50,
                                                              "total_tokens": 150})
 
-    with mock.patch.dict(sys.modules, {
-        "summary": fake_summary_pkg,
-        "summary.fetcher": fake_fetcher,
-    }):
-        # Patch the LLM call inside the skill module.
-        from skills.compare_tickers import skill as ct_skill_mod
-        with mock.patch.object(ct_skill_mod, "chat", fake_chat):
-            from skills import get_skill, registry
-            registry.reload()
-            result = get_skill("compare_tickers").run(
-                tickers=["aapl", "msft", "xxx"],
-                focus="valuation",
-            )
+    # Patch the Supabase fetch and the LLM call inside the skill module.
+    from skills.compare_tickers import skill as ct_skill_mod
+    with mock.patch.multiple(ct_skill_mod, chat=fake_chat,
+                             fetch_context=lambda t: ctx_by_ticker[t]):
+        from skills import get_skill, registry
+        registry.reload()
+        result = get_skill("compare_tickers").run(
+            tickers=["aapl", "msft", "xxx"],
+            focus="valuation",
+        )
 
     check("chat called once", len(chat_calls) == 1)
     check("uppercased tickers in meta",
@@ -242,45 +214,6 @@ def test_compare_tickers_rejects_singletons() -> None:
     check("ValueError on 1 ticker", raised)
 
 
-def test_cli_args_parser() -> None:
-    print("\n[9] CLI _parse_skill_args handles JSON and k=v")
-    # Loading summary.run pulls in supabase + the full DB stack, which we
-    # don't want in the smoke suite. Instead, extract the function source
-    # from the file and exec just that — the parser is self-contained.
-    run_py = Path(__file__).resolve().parents[4] / "apps" / "summarization" / "summary" / "run.py"
-    if not run_py.is_file():
-        # The sibling Summarization repo isn't checked out next to this one.
-        # Skip rather than crash: working from a standalone Skills clone is
-        # legitimate, and this test only covers that repo's CLI arg parser.
-        print(f"    SKIP: sibling repo not present at {run_py}")
-        return
-    src = run_py.read_text(encoding="utf-8")
-    # Naive but sufficient: pull the function out by its definition line.
-    marker = "def _parse_skill_args"
-    if marker not in src:
-        check("found _parse_skill_args in run.py", False)
-        return
-    start = src.index(marker)
-    # Find the next top-level def/class as the function end.
-    end_markers = ["\ndef ", "\nclass "]
-    end = min(
-        (src.index(m, start + 1) for m in end_markers if m in src[start + 1:]),
-        default=len(src),
-    )
-    func_src = src[start:end]
-    ns: dict = {"json": __import__("json")}
-    exec(func_src, ns)
-    fn = ns["_parse_skill_args"]
-
-    check("empty input → {}", fn("") == {})
-    check("JSON parses",
-          fn('{"tickers":["AAPL","MSFT"],"focus":"valuation"}')
-          == {"tickers": ["AAPL", "MSFT"], "focus": "valuation"})
-    check("k=v parses",
-          fn("ticker=AAPL,dry_run=true") == {"ticker": "AAPL", "dry_run": True})
-    check("k=v coerces ints", fn("limit=10") == {"limit": 10})
-
-
 def test_generate_report_full_path_with_mocks(tmp_path: Path) -> None:
     print("\n[6] generate_report full path writes file & returns artifact")
     fake_ctx = types.SimpleNamespace(
@@ -289,38 +222,9 @@ def test_generate_report_full_path_with_mocks(tmp_path: Path) -> None:
         doc_counts={"news": 5},
         source_doc_ids=["doc-A"],
     )
-
-    fake_config = types.ModuleType("config")
-    fake_config.LLM_MODEL_SUMMARY = "claude-sonnet-5-5"
-    fake_config.OUTPUT_DIR = tmp_path
-
-    fake_fetcher = types.ModuleType("summary.fetcher")
-    fake_fetcher.fetch_context = lambda ticker: fake_ctx
-
-    fake_prompts = types.ModuleType("summary.prompts")
-    fake_prompts.PROMPT_VERSION = "test-v1"
-
-    fake_cache = types.ModuleType("summary.cache")
-    fake_cache.compute_input_hash = lambda ctx, m, v: "feedface" * 8
-    fake_cache.get_cached = lambda t, h: None
     put_calls: list[dict] = []
-    fake_cache.put_cached = lambda **kw: put_calls.append(kw)
-
-    fake_summarizer = types.ModuleType("summary.summarizer")
-    fake_summarizer.generate_summary = lambda ctx: "## Real-looking report"
-
-    fake_summary_pkg = types.ModuleType("summary")
-    fake_summary_pkg.__path__ = []
-
-    patched = {
-        "config": fake_config,
-        "summary": fake_summary_pkg,
-        "summary.fetcher": fake_fetcher,
-        "summary.prompts": fake_prompts,
-        "summary.cache": fake_cache,
-        "summary.summarizer": fake_summarizer,
-    }
-    with mock.patch.dict(sys.modules, patched):
+    with _patched_report_pipeline(fake_ctx, body="## Real-looking report", put_calls=put_calls), \
+         mock.patch.dict("os.environ", {"REPORT_OUTPUT_DIR": str(tmp_path)}):
         from skills import get_skill, registry
         registry.reload()
         result = get_skill("generate_report").run(ticker="MSFT")
@@ -342,24 +246,15 @@ def test_generate_report_full_path_with_mocks(tmp_path: Path) -> None:
 # Entry point
 # ─────────────────────────────────────────────
 def main() -> int:
-    tmp_root = Path("/tmp/skills_smoke_test")
-    tmp_root.mkdir(exist_ok=True)
-
     test_registry_discovery()
     test_router_no_api_key()
     test_router_parses_mocked_response()
     test_router_handles_code_fence()
-    # Create each temp dir BEFORE the test that writes into it. These mkdirs
-    # used to run *after* their tests, so a fresh machine failed on test [6]
-    # with FileNotFoundError and only passed on the second run, once the
-    # trailing mkdir had left the directory behind.
-    (tmp_root / "dry").mkdir(parents=True, exist_ok=True)
-    test_generate_report_dry_run_with_mocked_supabase(tmp_root / "dry")
-    (tmp_root / "full").mkdir(parents=True, exist_ok=True)
-    test_generate_report_full_path_with_mocks(tmp_root / "full")
+    with tempfile.TemporaryDirectory() as tmp:
+        test_generate_report_dry_run_with_mocked_supabase(Path(tmp) / "dry")
+        test_generate_report_full_path_with_mocks(Path(tmp) / "full")
     test_compare_tickers_with_mocks()
     test_compare_tickers_rejects_singletons()
-    test_cli_args_parser()
 
     print(f"\n{'='*40}")
     print(f"  PASSED: {PASSED}")

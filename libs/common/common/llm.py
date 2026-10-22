@@ -1,12 +1,6 @@
 """
-shared/llm.py
-Shared Claude (Anthropic) LLM client — singleton + retry logic.
-
-Used by:
-  - summary/summarizer.py   (report generation, LLM_MODEL_SUMMARY)
-  - question/generator.py   (QA generation, LLM_MODEL_QA, streaming)
-  - question/router.py      (L2 classification, LLM_MODEL_CLASSIFY)
-  - question/structured.py  (JSON generation, LLM_MODEL_QA)
+common/llm.py
+The one Claude (Anthropic) client in the monorepo — singleton, retries, audit.
 
 Callers pass OpenAI-style messages ([{"role": "system"|"user"|"assistant", ...}]);
 split_messages() lifts system turns into Claude's top-level `system` field.
@@ -20,9 +14,11 @@ import logging
 import time
 from typing import Any, Generator, Optional
 
+import os
+
 import anthropic
 
-from config import ANTHROPIC_API_KEY
+from common.audit import log_api_call
 
 logger = logging.getLogger(__name__)
 
@@ -45,17 +41,17 @@ def get_client() -> anthropic.Anthropic:
     """Lazy singleton — one Anthropic client shared across the entire process."""
     global _client
     if _client is None:
-        if not ANTHROPIC_API_KEY:
+        if not has_api_key():
             raise ValueError("ANTHROPIC_API_KEY is not set. Check your .env file.")
         # Retries are handled below so they can be audited; disable SDK retries
         # to avoid compounding attempts.
-        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, max_retries=0)
+        _client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=0)
     return _client
 
 
 def has_api_key() -> bool:
     """Check if ANTHROPIC_API_KEY is configured (without raising)."""
-    return bool(ANTHROPIC_API_KEY)
+    return bool(os.getenv("ANTHROPIC_API_KEY"))
 
 
 def split_messages(messages: list[dict]) -> tuple[Optional[str], list[dict]]:
@@ -167,8 +163,6 @@ def chat(
     if timeout is not None:
         kwargs["timeout"] = timeout
 
-    from audit import log_api_call
-
     for attempt in range(1, max_retries + 1):
         t0 = time.time()
         try:
@@ -226,6 +220,7 @@ def chat_stream(
     effort: str = "medium",
     show_thinking: bool = True,
     max_retries: int = 3,
+    service: str = "question",
 ) -> Generator[tuple, None, None]:
     """Send a streaming Messages API request — yields (type, text) tuples.
 
@@ -239,8 +234,6 @@ def chat_stream(
     propagation issues with ASGI.
     """
     resource, kwargs = build_request(messages, model, max_tokens, effort, show_thinking=show_thinking)
-
-    from audit import log_api_call
 
     for attempt in range(1, max_retries + 1):
         emitted = False
@@ -260,7 +253,7 @@ def chat_stream(
 
             usage = usage_dict(final.usage)
             log_api_call(
-                service="question",
+                service=service,
                 api_type="claude_llm",
                 endpoint="messages.stream",
                 model=final.model,
@@ -277,7 +270,7 @@ def chat_stream(
             logger.warning(f"Stream {type(e).__name__} (attempt {attempt}/{max_retries}): {e}")
             if isinstance(e, anthropic.RateLimitError):
                 log_api_call(
-                    service="question",
+                    service=service,
                     api_type="claude_llm", endpoint="messages.stream", model=model,
                     status="rate_limited", error_msg=str(e)[:200],
                 )

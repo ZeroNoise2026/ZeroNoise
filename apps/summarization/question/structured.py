@@ -2,7 +2,7 @@
 question/structured.py
 Plan 4 — call Claude to produce structured JSON, validate, then return.
 
-Differences from shared/llm.py::chat():
+Differences from common.llm.chat():
   * Constrains output with structured outputs (output_config.format json_schema)
   * jsonschema validation of the full schema, retry once on failure
   * Returns dict (already parsed), raises StructuredGenError on failure
@@ -20,7 +20,7 @@ from typing import Any
 from jsonschema import Draft202012Validator
 
 from config import LLM_MODEL_QA
-from shared.llm import chat, LLMRefusal
+from common.llm import chat, LLMRefusal
 
 logger = logging.getLogger(__name__)
 
