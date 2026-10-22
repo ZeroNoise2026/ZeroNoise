@@ -1,4 +1,4 @@
-# zeroNoise
+# ZeroNoise
 
 Financial research assistant: daily briefings, watchlist management, RAG-based
 Q&A over SEC filings and news, and on-demand ticker research reports — powered
