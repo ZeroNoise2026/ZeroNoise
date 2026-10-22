@@ -15,7 +15,7 @@ any consumer in the project can invoke.
 
 > **For engineers:** an installable Python package (`skills`) that owns skill
 > discovery, the LLM router mapping user messages to skills, and a small
-> neutral Moonshot client.
+> neutral Claude client.
 
 ## Layout
 
@@ -28,7 +28,7 @@ Skills/                       <- the repo (clone dir name is irrelevant)
     ├── base.py               Skill ABC + SkillResult
     ├── registry.py           auto-discovery of skills/*/skill.py
     ├── router.py             message -> (skill, args) classifier
-    ├── _llm.py               neutral Moonshot client
+    ├── _llm.py               neutral Claude client
     ├── generate_report/      SKILL.md + skill.py
     ├── compare_tickers/      SKILL.md + skill.py
     └── tests/
@@ -140,7 +140,7 @@ Any subdirectory of `skills/` not starting with `_` or `.` and containing a
 
 ## How routing works
 
-One Moonshot call with a system prompt listing every registered skill (name,
+One Claude call with a system prompt listing every registered skill (name,
 description, JSON schema). The model returns:
 
 ```json
@@ -148,7 +148,7 @@ description, JSON schema). The model returns:
 ```
 
 …or `{"skill": null}` when nothing fits. The classifier is small and cheap
-(`moonshot-v1-8k`, temperature 0), so routing costs roughly one fast call per
+(`claude-haiku-5-5`, effort `low`), so routing costs roughly one fast call per
 message. Inspect the exact prompt with:
 
 ```bash
@@ -159,16 +159,16 @@ python -m skills.tests.test_router_prompt
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `MOONSHOT_API_KEY` | required | Without it, routing and LLM-backed skills disable themselves and the caller falls through to its default behaviour |
-| `MOONSHOT_BASE_URL` | `https://api.moonshot.ai/v1` | API endpoint |
-| `SKILLS_ROUTER_MODEL` | `moonshot-v1-8k` | Model used for routing |
+| `ANTHROPIC_API_KEY` | required | Without it, routing and LLM-backed skills disable themselves and the caller falls through to its default behaviour |
+| `SKILLS_ROUTER_MODEL` | `claude-haiku-5-5` | Model used for routing |
+| `SKILLS_COMPARE_MODEL` | `claude-haiku-5-5` | Model used by `compare_tickers` |
 
 ## Testing
 
 ```bash
 python -m skills.tests.test_smoke          # 33 offline cases, fully mocked
 python -m skills.tests.test_router_prompt  # print the router prompt, send nothing
-python -m skills.tests.test_live_router    # real Moonshot call; needs the key
+python -m skills.tests.test_live_router    # real Claude call; needs the key
 ```
 
 CI runs the first one on ubuntu plus an import guard. The smoke suite skips its
@@ -196,7 +196,7 @@ If a file here ever moves up or down a level, that constant moves with it.
   can keep request-scoped state on `self` safely.
 - **No persistence.** Results go back to the caller; there is no `skill_runs`
   table. `SkillResult.artifacts` is the escape hatch for skills that write files.
-- **`_llm.py` is the survivor.** Two near-identical Moonshot wrappers exist
+- **`_llm.py` is the survivor.** Two near-identical Claude wrappers exist
   elsewhere (`Summarization/shared/llm.py`, `QuantAgent/backend/summarizer.py`).
   When those three are consolidated, this is the one to keep.
 
@@ -205,7 +205,7 @@ If a file here ever moves up or down a level, that constant moves with it.
 - `registry.invoke()` does not validate kwargs against the JSON schema. Harmless
   while a human reads the output; genuinely dangerous the day this runs in a
   loop, where a bad arg silently corrupts a whole trajectory.
-- The Moonshot client is duplicated in three places (see above).
+- The Claude client is duplicated in three places (see above).
 - `compare_tickers` lets the LLM build the metrics table. More robust would be
   to assemble it deterministically from `earnings` / `price_snapshot` and let the
   LLM write only the prose around it — the pattern `Summarization/question`

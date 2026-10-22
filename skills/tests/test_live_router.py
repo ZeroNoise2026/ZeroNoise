@@ -1,12 +1,12 @@
 """
 skills/tests/test_live_router.py
-Real Moonshot API smoke test — only the router, not the full skills.
+Real Claude API smoke test — only the router, not the full skills.
 
 We deliberately don't invoke generate_report / compare_tickers here because
 those would hit Supabase (slower, and prone to env-specific data state).
 Routing is the cheapest end-to-end check: ~1 small LLM call per query.
 
-Requires MOONSHOT_API_KEY in .env. Run from repo root:
+Requires ANTHROPIC_API_KEY in .env. Run from repo root:
 
     python -m skills.tests.test_live_router
 """
@@ -17,7 +17,7 @@ import os
 import sys
 from pathlib import Path
 
-# Pull MOONSHOT_API_KEY from Summarization/.env (the canonical project env)
+# Pull ANTHROPIC_API_KEY from Summarization/.env (the canonical project env)
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -29,8 +29,8 @@ else:
 
 
 def main() -> int:
-    if not os.environ.get("MOONSHOT_API_KEY"):
-        print("SKIP: MOONSHOT_API_KEY not set")
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("SKIP: ANTHROPIC_API_KEY not set")
         return 0
 
     from skills.router import route

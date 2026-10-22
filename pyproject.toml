@@ -9,7 +9,7 @@ description = "Shared skill framework for the QuantAgent project"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-    "openai>=1.0",
+    "anthropic>=2.1.0",
 ]
 
 [project.optional-dependencies]

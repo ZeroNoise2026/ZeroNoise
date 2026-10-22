@@ -3,7 +3,7 @@ skills/router.py
 Decide whether a user message should be handled by a skill, and if so which
 one with what arguments.
 
-Strategy: a single Moonshot call with a short system prompt listing every
+Strategy: a single Claude call with a short system prompt listing every
 registered skill (name + description + parameters). The model returns JSON:
 
     {"skill": "compare_tickers", "args": {"tickers": ["AAPL", "MSFT"]}}
@@ -15,9 +15,7 @@ or, when no skill fits:
 The chat endpoint uses the latter as the signal to fall back to the
 existing RAG flow.
 
-STATUS: skeleton. The Moonshot call itself is stubbed — we have to decide
-whether to reuse summary.summarizer's client or import the openai SDK
-directly here. See TODO in _call_router_llm.
+The call goes through skills._llm, the package's own Claude client.
 """
 
 from __future__ import annotations
@@ -36,9 +34,9 @@ logger = logging.getLogger("skills.router")
 
 # Small, cheap model — routing is a classification, not generation.
 # Override with SKILLS_ROUTER_MODEL if you want to A/B-test a smarter model.
-_ROUTER_MODEL = os.environ.get("SKILLS_ROUTER_MODEL", "moonshot-v1-8k")
-_ROUTER_TEMPERATURE = 0.0  # deterministic routing
-_ROUTER_MAX_TOKENS = 200    # the JSON we want back is tiny
+_ROUTER_MODEL = os.environ.get("SKILLS_ROUTER_MODEL", "claude-haiku-5-5")
+_ROUTER_EFFORT = "low"      # classification — keep routing fast
+_ROUTER_MAX_TOKENS = 2000   # the JSON is tiny; headroom is for thinking
 
 
 # ─────────────────────────────────────────────
@@ -94,20 +92,20 @@ def _build_system_prompt() -> str:
 
 
 # ─────────────────────────────────────────────
-# LLM call (stub)
+# LLM call
 # ─────────────────────────────────────────────
 def _call_router_llm(system_prompt: str, user_message: str) -> str:
-    """Send a routing classification request to Moonshot.
+    """Send a routing classification request to Claude.
 
     Returns the model's raw text content. Caller (`route`) is responsible
     for JSON parsing and validation.
 
-    If MOONSHOT_API_KEY is unset we short-circuit to a no-route response
+    If ANTHROPIC_API_KEY is unset we short-circuit to a no-route response
     so the framework remains importable in environments (e.g. CI) without
     credentials.
     """
     if not has_api_key():
-        logger.warning("MOONSHOT_API_KEY not set — router defaulting to no-route")
+        logger.warning("ANTHROPIC_API_KEY not set — router defaulting to no-route")
         return '{"skill": null}'
 
     content, _usage = chat(
@@ -116,7 +114,7 @@ def _call_router_llm(system_prompt: str, user_message: str) -> str:
             {"role": "user", "content": user_message},
         ],
         model=_ROUTER_MODEL,
-        temperature=_ROUTER_TEMPERATURE,
+        effort=_ROUTER_EFFORT,
         max_tokens=_ROUTER_MAX_TOKENS,
     )
     return content
