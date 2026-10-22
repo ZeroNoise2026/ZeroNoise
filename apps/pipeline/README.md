@@ -6,9 +6,8 @@ Pulls raw financial data from Finnhub, SEC EDGAR and FMP; cleans and chunks it;
 calls `embedding-service` to vectorize; writes to Supabase. Also exposes a small
 FastAPI layer for ad-hoc live lookups the other services hit directly.
 
-> Part of the [QuantAgent](https://github.com/ZeroNoise2026/QuantAgent) stack.
-> You do not clone this repo directly: clone QuantAgent and run `./dev.sh`,
-> which pulls this one as a sibling and sets up its venv and `.env`.
+> Part of the QuantAgent monorepo. Run `./dev.sh` from the repo root — it sets
+> up this directory's venv and `.env`.
 
 > **For PMs / analysts:** this is the upstream pipeline that keeps Supabase
 > fresh. Everything users see in chat, briefings or research reports is fetched,

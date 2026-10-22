@@ -25,10 +25,9 @@ from skills.base import Skill, SkillResult
 
 logger = logging.getLogger("skills.compare_tickers")
 
-# Depth note: this file is <project-root>/Skills/skills/<pkg>/skill.py, so
-# parents[3] is the project root holding both the Skills clone and the
-# sibling Summarization repo. Update if this file ever moves.
-_SUMMARIZATION_DIR = Path(__file__).resolve().parents[3] / "Summarization"
+# Depth note: this file is <repo-root>/libs/skills/skills/<pkg>/skill.py, so
+# parents[4] is the monorepo root. Update if this file ever moves.
+_SUMMARIZATION_DIR = Path(__file__).resolve().parents[4] / "apps" / "summarization"
 
 # Per-ticker character budget. Three tickers × 80k ≈ 240k chars ≈ ~60k
 # tokens — well inside the 1M context and under Haiku's 100k-token

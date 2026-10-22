@@ -247,7 +247,7 @@ def test_cli_args_parser() -> None:
     # Loading summary.run pulls in supabase + the full DB stack, which we
     # don't want in the smoke suite. Instead, extract the function source
     # from the file and exec just that — the parser is self-contained.
-    run_py = Path(__file__).resolve().parents[3] / "Summarization" / "summary" / "run.py"
+    run_py = Path(__file__).resolve().parents[4] / "apps" / "summarization" / "summary" / "run.py"
     if not run_py.is_file():
         # The sibling Summarization repo isn't checked out next to this one.
         # Skip rather than crash: working from a standalone Skills clone is

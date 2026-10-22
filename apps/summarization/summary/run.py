@@ -23,23 +23,14 @@ from summary.prompts import PROMPT_VERSION
 from summary.cache import compute_input_hash, get_cached, put_cached
 from shared.db import get_tracked_tickers
 
-# Make the shared `skills` package importable.
-#
-# The package lives at <project-root>/<clone>/skills/, where <clone> is
-# whatever `git clone .../Skills.git` produced — "Skills" by default, which
-# does NOT match `import skills` on a case-sensitive filesystem (Linux,
-# Docker, CI). So probe the candidate clone names instead of assuming one.
-#
-# If no candidate matches, the package was pip-installed instead (see
-# Skills/pyproject.toml) and the installed distribution is used — that is
-# how the container image gets it.
-_PROJECT_ROOT = Path(__file__).resolve().parents[2]
-for _clone_name in ("Skills", "skills"):
-    _skills_repo = _PROJECT_ROOT / _clone_name
-    if (_skills_repo / "skills" / "__init__.py").is_file():
-        if str(_skills_repo) not in sys.path:
-            sys.path.insert(0, str(_skills_repo))
-        break
+# Make the shared `skills` package importable from the monorepo checkout
+# (libs/skills/skills/). If it isn't there, the package was pip-installed
+# instead (see libs/skills/pyproject.toml) — that is how the container image
+# gets it.
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_skills_repo = _REPO_ROOT / "libs" / "skills"
+if (_skills_repo / "skills" / "__init__.py").is_file() and str(_skills_repo) not in sys.path:
+    sys.path.insert(0, str(_skills_repo))
 
 logging.basicConfig(
     level=logging.INFO,

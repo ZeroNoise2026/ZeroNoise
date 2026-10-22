@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
 #
-# dev.sh — single entry point for the whole QuantAgent stack.
-#
-# You only ever clone THIS repo. Everything else is pulled by `sync`.
+# dev.sh — single entry point for the whole stack, in one monorepo.
 #
 #   git clone https://github.com/ZeroNoise2026/QuantAgent.git
 #   cd QuantAgent && ./dev.sh
 #
 # Commands
-#   ./dev.sh                 sync + setup + doctor  (start here; idempotent)
-#   ./dev.sh sync            clone/pull the sibling repos
+#   ./dev.sh                 setup + doctor  (start here; idempotent)
+#   ./dev.sh sync            git pull --ff-only
 #   ./dev.sh setup [svc...]  venvs, deps, .env scaffolding
 #   ./dev.sh doctor          what is ready, what is blocked, and why
 #   ./dev.sh test            offline suites (zero credentials)
@@ -25,18 +23,16 @@
 #
 # services: embedding pipeline question backend frontend
 #
-# Layout it produces — sibling repos, NOT nested inside this one:
+# Layout
 #
-#   <workspace>/
-#   ├── QuantAgent/          <- you cloned this; dev.sh lives here
-#   ├── Skills/              <- pulled by ./dev.sh sync
-#   ├── Summarization/
-#   ├── data-pipeline/
-#   └── embedding-service/
+#   apps/backend        FastAPI BFF                       (service: backend)
+#   apps/web            React frontend                    (service: frontend)
+#   apps/summarization  question service + summary CLI    (service: question)
+#   apps/pipeline       ingestion + live-lookup API       (service: pipeline)
+#   apps/embedding      embedding API                     (service: embedding)
+#   libs/skills         shared skill framework (library, not a service)
 #
-# Sibling (not nested) is deliberate: every cross-repo import in the codebase
-# resolves via `parents[N]` assuming this shape. Nesting would silently break
-# skills discovery and the Summarization lookups.
+# Rule: apps never import each other. Code two apps need goes in libs/.
 #
 # Secrets
 #   One file holds every shared credential, outside all repos so it can never
@@ -45,7 +41,6 @@
 #   overwrites only the keys that service's .env already declares.
 #
 # Env
-#   GIT_PROTOCOL=ssh     use git@github.com: instead of https:// for sync
 #   QUANT_SECRETS_FILE   path of the central secrets file
 #   DEPLOY_PROJECT       GCP project for `secrets pull` (default: gcloud config)
 #
@@ -53,14 +48,11 @@
 
 set -euo pipefail
 
-QUANT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$QUANT_DIR/.." && pwd)"
-STATE="$QUANT_DIR/.devstack"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE="$ROOT/.devstack"
 LOGS="$STATE/logs"
 PIDS="$STATE/pids"
 
-GH_ORG="ZeroNoise2026"
-SIBLING_REPOS="Skills Summarization data-pipeline embedding-service"
 ALL_SERVICES="embedding pipeline question backend frontend"
 
 SECRETS_FILE="${QUANT_SECRETS_FILE:-$HOME/.config/quantagent/secrets.env}"
@@ -90,15 +82,13 @@ die()  { printf '\n%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 # ─────────────────────────────────────────────────────────────
 # service registry (case statements — bash 3.2 has no assoc arrays)
 # ─────────────────────────────────────────────────────────────
-# Absolute paths, so this keeps working even if the clone directory is not
-# literally named "QuantAgent".
 svc_path() {
   case "$1" in
-    embedding) echo "$ROOT/embedding-service" ;;
-    pipeline)  echo "$ROOT/data-pipeline" ;;
-    question)  echo "$ROOT/Summarization" ;;
-    backend)   echo "$QUANT_DIR/backend" ;;
-    frontend)  echo "$QUANT_DIR/frontend" ;;
+    embedding) echo "$ROOT/apps/embedding" ;;
+    pipeline)  echo "$ROOT/apps/pipeline" ;;
+    question)  echo "$ROOT/apps/summarization" ;;
+    backend)   echo "$ROOT/apps/backend" ;;
+    frontend)  echo "$ROOT/apps/web" ;;
     *) return 1 ;;
   esac
 }
@@ -113,8 +103,8 @@ svc_label() {
     embedding) echo "embedding-service (vectors)" ;;
     pipeline)  echo "data-pipeline API (live lookups)" ;;
     question)  echo "question-service (RAG Q&A)" ;;
-    backend)   echo "QuantAgent backend (BFF)" ;;
-    frontend)  echo "QuantAgent frontend (React)" ;;
+    backend)   echo "backend (BFF)" ;;
+    frontend)  echo "frontend (React)" ;;
   esac
 }
 # Env vars that must hold a real value before the service can usefully start.
@@ -144,10 +134,6 @@ svc_start_cmd() {
   esac
 }
 is_node_svc() { [ "$1" = "frontend" ]; }
-repo_url() {
-  if [ "${GIT_PROTOCOL:-https}" = "ssh" ]; then echo "git@github.com:$GH_ORG/$1.git"
-  else echo "https://github.com/$GH_ORG/$1.git"; fi
-}
 
 # ─────────────────────────────────────────────────────────────
 # helpers
@@ -206,38 +192,14 @@ resolve_svcs() { if [ "$#" -eq 0 ]; then echo "$ALL_SERVICES"; else for s in "$@
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. $2"; }
 
 # ─────────────────────────────────────────────────────────────
-# sync — pull the sibling repos
+# sync
 # ─────────────────────────────────────────────────────────────
 cmd_sync() {
   need_cmd git "Install git first."
-  # Refuse to scatter repos across a home directory or a filesystem root.
-  case "$ROOT" in
-    "$HOME"|"/"|"") die "This repo is cloned directly into '$ROOT'. Sibling repos would be
-       created there. Re-clone into a dedicated workspace folder instead:
-         mkdir ~/quantagent && cd ~/quantagent
-         git clone $(repo_url QuantAgent)" ;;
-  esac
-
-  head1 "SYNC  (workspace: $ROOT)"
-  info "protocol: ${GIT_PROTOCOL:-https}   (GIT_PROTOCOL=ssh to switch)"
-  local r dir
-  for r in $SIBLING_REPOS; do
-    dir="$ROOT/$r"
-    if [ -d "$dir/.git" ]; then
-      # --ff-only: never invent a merge commit in someone's working repo.
-      if git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
-        ok "$r up to date ($(git -C "$dir" rev-parse --short HEAD))"
-      else
-        warn "$r: fast-forward pull failed — local commits or a dirty tree? left untouched"
-      fi
-    elif [ -d "$dir" ]; then
-      warn "$r: directory exists but is not a git repo — left untouched"
-    else
-      info "$r: cloning"
-      if git clone --quiet "$(repo_url "$r")" "$dir"; then ok "$r cloned"
-      else bad "$r: clone failed ($(repo_url "$r"))"; fi
-    fi
-  done
+  head1 "SYNC"
+  # --ff-only: never invent a merge commit in a working checkout.
+  if git -C "$ROOT" pull --ff-only --quiet; then ok "up to date ($(git -C "$ROOT" rev-parse --short HEAD))"
+  else warn "fast-forward pull failed — local commits or a dirty tree? left untouched"; fi
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -264,18 +226,17 @@ scaffold_env() {
 setup_python_svc() {
   local svc="$1" dir venv
   dir="$(svc_path "$svc")"; venv="$dir/venv"
-  [ -d "$dir" ] || { warn "$svc: $dir missing — run ./dev.sh sync first"; return 0; }
+  [ -d "$dir" ] || { warn "$svc: $dir missing"; return 0; }
   if [ ! -x "$venv/bin/python" ]; then info "$svc: creating venv"; python3 -m venv "$venv"; fi
   "$venv/bin/python" -m pip install --quiet --upgrade pip >/dev/null
   if [ -f "$dir/requirements.txt" ]; then
     info "$svc: installing requirements (can take a few minutes)"
     "$venv/bin/python" -m pip install --quiet -r "$dir/requirements.txt"
   fi
-  # Prefer the LOCAL Skills clone over the git pin in requirements.txt, so
-  # edits to Skills take effect without a push→reinstall round trip.
-  if [ "$svc" = "backend" ] && [ -f "$ROOT/Skills/pyproject.toml" ]; then
-    "$venv/bin/python" -m pip install --quiet -e "$ROOT/Skills"
-    info "$svc: skills installed editable from ../Skills (overrides the git pin)"
+  # libs/ packages install editable, so edits take effect without a reinstall.
+  if [ "$svc" = "backend" ]; then
+    "$venv/bin/python" -m pip install --quiet -e "$ROOT/libs/skills"
+    info "$svc: skills installed editable from libs/skills"
   fi
   ok "$svc: python deps ready"
   scaffold_env "$svc"
@@ -299,18 +260,17 @@ cmd_setup() {
     if is_node_svc "$s"; then setup_frontend; else setup_python_svc "$s"; fi
   done
   secrets_apply
-  # Skills is a library, not a service, but its offline suite is the fastest
-  # proof the codebase is intact — give it a venv too. Non-fatal on failure.
-  if [ -f "$ROOT/Skills/pyproject.toml" ] && [ ! -x "$ROOT/Skills/venv/bin/python" ]; then
-    if python3 -m venv "$ROOT/Skills/venv" \
-       && "$ROOT/Skills/venv/bin/python" -m pip install --quiet --upgrade pip >/dev/null \
-       && "$ROOT/Skills/venv/bin/python" -m pip install --quiet -e "$ROOT/Skills"; then
-      ok "Skills: venv ready (editable install)"
+  # libs/skills is a library, not a service, but its offline suite is the
+  # fastest proof the codebase is intact — give it a venv too. Non-fatal.
+  local sk="$ROOT/libs/skills"
+  if [ ! -x "$sk/venv/bin/python" ]; then
+    if python3 -m venv "$sk/venv" \
+       && "$sk/venv/bin/python" -m pip install --quiet --upgrade pip >/dev/null \
+       && "$sk/venv/bin/python" -m pip install --quiet -e "$sk"; then
+      ok "libs/skills: venv ready (editable install)"
     else
-      warn "Skills: editable install failed — ./dev.sh test will skip the smoke suite"
+      warn "libs/skills: editable install failed — ./dev.sh test will skip the smoke suite"
     fi
-  elif [ -d "$ROOT/Skills" ] && [ ! -f "$ROOT/Skills/pyproject.toml" ]; then
-    warn "Skills/pyproject.toml missing — run ./dev.sh sync to update it"
   fi
 }
 
@@ -320,11 +280,7 @@ cmd_setup() {
 cmd_doctor() {
   head1 "WORKSPACE"
   info "$ROOT"
-  local r
-  for r in $SIBLING_REPOS; do
-    if [ -d "$ROOT/$r/.git" ]; then ok "$(printf '%-18s %s' "$r" "$(git -C "$ROOT/$r" rev-parse --short HEAD 2>/dev/null)")"
-    else bad "$(printf '%-18s missing -> ./dev.sh sync' "$r")"; fi
-  done
+  ok "$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null) @ $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)"
 
   secrets_status
 
@@ -353,10 +309,10 @@ cmd_doctor() {
 
   head1 "WHAT YOU CAN DO RIGHT NOW"
   info "./dev.sh test    offline suites, zero credentials"
-  if [ -n "$(env_val "$QUANT_DIR/backend/.env" ANTHROPIC_API_KEY 2>/dev/null || true)" ]; then
+  if [ -n "$(env_val "$ROOT/apps/backend/.env" ANTHROPIC_API_KEY 2>/dev/null || true)" ]; then
     info "./dev.sh eval    eval suite (ANTHROPIC_API_KEY found)"
   else
-    warn "./dev.sh eval  blocked: set ANTHROPIC_API_KEY in backend/.env"
+    warn "./dev.sh eval  blocked: set ANTHROPIC_API_KEY (./dev.sh secrets)"
   fi
   if [ "$blocked" -gt 0 ]; then
     printf '\n  %s%s service(s) blocked.%s Supabase keys: Dashboard -> Project Settings -> API.\n' "$C_YEL" "$blocked" "$C_RESET"
@@ -369,15 +325,15 @@ cmd_doctor() {
 cmd_test() {
   head1 "OFFLINE SUITES (no credentials)"
   local rc=0
-  if [ -x "$ROOT/Skills/venv/bin/python" ]; then
+  if [ -x "$ROOT/libs/skills/venv/bin/python" ]; then
     say "  skills smoke suite:"
-    ( cd "$ROOT/Skills" && ./venv/bin/python -m skills.tests.test_smoke ) || rc=1
+    ( cd "$ROOT/libs/skills" && ./venv/bin/python -m skills.tests.test_smoke ) || rc=1
   else
-    warn "Skills venv missing -> ./dev.sh setup"; rc=1
+    warn "libs/skills venv missing -> ./dev.sh setup"; rc=1
   fi
-  if [ -x "$QUANT_DIR/backend/venv/bin/python" ]; then
+  if [ -x "$ROOT/apps/backend/venv/bin/python" ]; then
     say ""; say "  eval structural checks (no LLM):"
-    ( cd "$QUANT_DIR/backend" && ./venv/bin/python -m evals.run --n 1 --no-judge ) || rc=1
+    ( cd "$ROOT/apps/backend" && ./venv/bin/python -m evals.run --n 1 --no-judge ) || rc=1
   else
     warn "backend venv missing -> ./dev.sh setup backend"
   fi
@@ -385,7 +341,7 @@ cmd_test() {
 }
 
 cmd_eval() {
-  local dir="$QUANT_DIR/backend"
+  local dir="$ROOT/apps/backend"
   [ -x "$dir/venv/bin/python" ] || die "backend venv missing. Run: ./dev.sh setup backend"
   secrets_apply
   [ -n "$(env_val "$dir/.env" ANTHROPIC_API_KEY 2>/dev/null || true)" ] || die "ANTHROPIC_API_KEY is empty in backend/.env"
@@ -605,12 +561,12 @@ cmd_logs() {
   tail -f "$LOGS/$1.log"
 }
 
-usage() { sed -n '2,52p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
+usage() { sed -n '2,47p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
 
 main() {
   local cmd="${1:-default}"; [ "$#" -gt 0 ] && shift || true
   case "$cmd" in
-    default)        cmd_sync; cmd_setup; cmd_doctor ;;
+    default)        cmd_setup; cmd_doctor ;;
     sync|pull)      cmd_sync ;;
     setup)          cmd_setup "$@" ;;
     doctor|check)   cmd_doctor ;;

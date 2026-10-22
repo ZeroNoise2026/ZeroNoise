@@ -2,9 +2,8 @@
 
 Two co-located services sharing one data layer and one LLM client.
 
-> Part of the [QuantAgent](https://github.com/ZeroNoise2026/QuantAgent) stack.
-> You do not clone this repo directly: clone QuantAgent and run `./dev.sh`,
-> which pulls this one as a sibling and sets up its venv and `.env`.
+> Part of the QuantAgent monorepo. Run `./dev.sh` from the repo root — it sets
+> up this directory's venv and `.env`.
 
 | Service | Form | Purpose |
 |---|---|---|
@@ -78,7 +77,7 @@ cp .env.example .env        # then fill in credentials
 ```
 
 Prerequisites: Python 3.11+, a Supabase project with
-`../data-pipeline/pipeline/schema.sql` applied and `pgvector` enabled, a
+`apps/pipeline/pipeline/schema.sql` applied and `pgvector` enabled, a
 Anthropic API key, and a reachable embedding-service on :8002.
 
 ## summary — CLI
@@ -162,7 +161,7 @@ Everything lives in `config.py`. Required: `SUPABASE_URL`, `SUPABASE_KEY`,
 ## Skills integration
 
 `summary/run.py` supports `--skill <name>` to route through the shared
-[Skills](https://github.com/ZeroNoise2026/Skills) framework; the legacy
+[Skills](../../libs/skills) framework; the legacy
 `--ticker` path is preserved verbatim. It locates the package by probing
 `<workspace>/Skills` and falling back to the pip-installed distribution.
 

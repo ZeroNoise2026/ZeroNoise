@@ -23,7 +23,7 @@ try:
 except ImportError:
     print("python-dotenv not installed; assuming env is already loaded")
 else:
-    env_path = Path(__file__).resolve().parents[3] / "Summarization" / ".env"
+    env_path = Path(__file__).resolve().parents[4] / "apps" / "summarization" / ".env"
     if env_path.exists():
         load_dotenv(env_path)
 

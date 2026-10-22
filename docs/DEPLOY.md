@@ -14,11 +14,11 @@ same repos, the same `.env` files and the same service registry.
 
 | Service | Cloud Run name | Source | Dockerfile |
 |---|---|---|---|
-| embedding | `qa-embedding` | `../embedding-service` | `Dockerfile` |
-| question | `qa-question` | `../Summarization` | `Dockerfile.question` |
-| backend | `qa-backend` | `backend/` | `Dockerfile` |
-| pipeline *(opt-in)* | `qa-pipeline` | `../data-pipeline` | `Dockerfile.api` |
-| frontend | — | `frontend/` | Vercel, see below |
+| embedding | `qa-embedding` | `apps/embedding` | `Dockerfile` |
+| question | `qa-question` | `apps/summarization` | `Dockerfile.question` |
+| backend | `qa-backend` | repo root | `apps/backend/Dockerfile` |
+| pipeline *(opt-in)* | `qa-pipeline` | `apps/pipeline` | `Dockerfile.api` |
+| frontend | — | `apps/web` | Vercel, see below |
 
 `deploy` without arguments does `embedding question backend`. `pipeline` is
 opt-in (`./deploy.sh deploy pipeline`) because the live-lookup API is only
@@ -82,17 +82,16 @@ A service physically cannot point at a stale URL.
 
 ## Images and traceability
 
-Every image is tagged with the git SHA of the repo it came from, so a Cloud Run
+Every image is tagged with the monorepo's git SHA, so a Cloud Run
 revision always maps back to a commit. A dirty working tree gets a `-dirty`
 suffix and a warning at preflight: you can ship it, you just cannot reproduce
 it.
 
-The backend is the exception worth understanding. Its build context is
-`backend/`, which cannot reach the sibling `Skills` repo, so `requirements.txt`
-installs `quantagent-skills` from git — **pinned to a commit**. `preflight`
-warns when that pin drifts from your local `../Skills` clone, which is exactly
-the moment your local testing stops describing production. Bump the pin
-manually when you want the newer Skills.
+The backend is the exception worth understanding. Its build context is the
+**repo root**, not `apps/backend/`, so the image can install `libs/skills`
+from the same checkout — what you test locally is exactly what ships. The
+root `.dockerignore` keeps venvs, `.env` files and `apps/web` out of that
+context.
 
 ## Frontend (Vercel)
 
@@ -113,7 +112,7 @@ Two directions to wire, and both are easy to forget:
 - **Vercel → backend**: `VITE_API_URL`. Baked in at *build* time, so changing it
   needs a redeploy, not a restart.
 - **backend → Vercel**: `ALLOWED_ORIGINS`. `./deploy.sh cors` sets it plus a
-  regex for preview deploys. Mirror it into `backend/.env` so the next full
+  regex for preview deploys. Mirror it into `apps/backend/.env` so the next full
   deploy does not drop it.
 
 ## Rolling back

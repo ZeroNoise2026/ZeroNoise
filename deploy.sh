@@ -3,7 +3,7 @@
 # deploy.sh — single entry point for deploying the QuantAgent stack to GCP.
 #
 # dev.sh runs the stack on your laptop. This runs it on Cloud Run, from the
-# same repos, the same .env files and the same service registry — so there is
+# same monorepo, the same .env files and the same service registry — so there is
 # exactly one place that knows what a service is called, what it needs, and
 # how big it should be.
 #
@@ -32,11 +32,10 @@
 
 set -euo pipefail
 
-QUANT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$QUANT_DIR/.." && pwd)"
-STATE="$QUANT_DIR/.deploy"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE="$ROOT/.deploy"
 URLS_FILE="$STATE/urls.env"
-RC_FILE="$QUANT_DIR/.deployrc"
+RC_FILE="$ROOT/.deployrc"
 
 [ -f "$RC_FILE" ] && . "$RC_FILE"
 
@@ -67,29 +66,30 @@ die()   { printf '\n%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 # ─────────────────────────────────────────────────────────────
 svc_dir() {
   case "$1" in
-    embedding) echo "$ROOT/embedding-service" ;;
-    pipeline)  echo "$ROOT/data-pipeline" ;;
-    question)  echo "$ROOT/Summarization" ;;
-    backend)   echo "$QUANT_DIR/backend" ;;
+    embedding) echo "$ROOT/apps/embedding" ;;
+    pipeline)  echo "$ROOT/apps/pipeline" ;;
+    question)  echo "$ROOT/apps/summarization" ;;
+    backend)   echo "$ROOT/apps/backend" ;;
     *) return 1 ;;
   esac
 }
-# The repo whose git SHA tags the image. backend builds from QuantAgent/backend
-# but the SHA that matters is QuantAgent's.
-svc_repo() {
+# Docker build context. backend builds from the repo root so the image can
+# COPY libs/ (shared code lives outside the app directory); the rest build from
+# their own app directory.
+svc_context() {
   case "$1" in
-    backend) echo "$QUANT_DIR" ;;
+    backend) echo "$ROOT" ;;
     *)       svc_dir "$1" ;;
   esac
 }
 # `gcloud run deploy --source .` only ever looks for a file named "Dockerfile".
-# Summarization has two images in one repo, so we always build explicitly.
+# apps/summarization has two images, so we always build explicitly.
 svc_dockerfile() {
   case "$1" in
     embedding) echo "Dockerfile" ;;
     pipeline)  echo "Dockerfile.api" ;;
     question)  echo "Dockerfile.question" ;;
-    backend)   echo "Dockerfile" ;;
+    backend)   echo "apps/backend/Dockerfile" ;;   # relative to svc_context
   esac
 }
 svc_run_name() { echo "qa-$1"; }
@@ -185,10 +185,9 @@ sa_email()   { echo "$(svc_sa_id "$1")@$(project_id).iam.gserviceaccount.com"; }
 # traceable back to a commit. A dirty tree gets a -dirty suffix and a warning:
 # you can still ship it, you just can never reproduce it.
 svc_tag() {
-  local repo sha
-  repo="$(svc_repo "$1")"
-  sha="$(git -C "$repo" rev-parse --short HEAD 2>/dev/null || echo nogit)"
-  if [ -n "$(git -C "$repo" status --porcelain 2>/dev/null)" ]; then echo "$sha-dirty"; else echo "$sha"; fi
+  local sha
+  sha="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+  if [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then echo "$sha-dirty"; else echo "$sha"; fi
 }
 
 save_url() {
@@ -265,27 +264,11 @@ cmd_preflight() {
   fi
 
   head1 "SOURCE"
-  local r sha
-  for r in QuantAgent Skills Summarization data-pipeline embedding-service; do
-    if [ -d "$ROOT/$r/.git" ]; then
-      sha="$(git -C "$ROOT/$r" rev-parse --short HEAD)"
-      if [ -n "$(git -C "$ROOT/$r" status --porcelain)" ]; then
-        warn "$(printf '%-18s %s (uncommitted changes — image will be tagged -dirty)' "$r" "$sha")"
-      else ok "$(printf '%-18s %s' "$r" "$sha")"; fi
-    else bad "$(printf '%-18s missing' "$r")"; fi
-  done
-  # The backend image installs Skills from git, not from the local clone. If the
-  # pin and the clone disagree, what you tested locally is not what ships.
-  local pin local_sha
-  pin="$(sed -n 's/.*Skills\.git@\([0-9a-f]\{7,\}\).*/\1/p' "$QUANT_DIR/backend/requirements.txt" | head -1)"
-  local_sha="$(git -C "$ROOT/Skills" rev-parse --short HEAD 2>/dev/null || true)"
-  if [ -z "$pin" ]; then
-    warn "Skills is pinned to a branch, not a commit — the backend image is not reproducible"
-  elif [ -n "$local_sha" ] && [ "${pin:0:7}" != "${local_sha:0:7}" ]; then
-    warn "Skills pin ($pin) != local clone ($local_sha) — the image will not contain your local Skills"
-  else
-    ok "Skills pinned to $pin (matches local clone)"
-  fi
+  local sha
+  sha="$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo nogit)"
+  if [ -n "$(git -C "$ROOT" status --porcelain 2>/dev/null)" ]; then
+    warn "$sha (uncommitted changes — images will be tagged -dirty)"
+  else ok "$sha"; fi
 
   head1 "SERVICES"
   local s file miss k v url
@@ -431,13 +414,13 @@ cmd_secrets() {
 # ─────────────────────────────────────────────────────────────
 build_image() {
   local svc="$1" dir img cfg
-  dir="$(svc_dir "$svc")"
+  dir="$(svc_context "$svc")"
   img="$(image_base)/$svc:$(svc_tag "$svc")"
   ensure_gcloudignore "$dir"
   mkdir -p "$STATE"
   cfg="$STATE/cloudbuild.$svc.yaml"
-  # Explicit docker build rather than --source: Summarization holds two images
-  # in one repo, and buildpack autodetection would pick the wrong entrypoint.
+  # Explicit docker build rather than --source: apps/summarization holds two
+  # images, and buildpack autodetection would pick the wrong entrypoint.
   cat > "$cfg" <<YAML
 steps:
   - name: 'gcr.io/cloud-builders/docker'
@@ -585,7 +568,7 @@ cmd_cors() {
     --update-env-vars "^@^ALLOWED_ORIGINS=$origins@ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app" \
     --quiet >/dev/null
   ok "backend CORS -> $origins (+ preview deploys via regex)"
-  info "also mirror this into backend/.env so the next full deploy keeps it"
+  info "also mirror this into apps/backend/.env so the next full deploy keeps it"
 }
 
 cmd_frontend() {
@@ -594,7 +577,7 @@ cmd_frontend() {
   head1 "VERCEL"
   say "  The frontend is a static Vite build; it is not deployed by this script."
   say ""
-  say "    cd $QUANT_DIR/frontend"
+  say "    cd $ROOT/apps/web"
   say "    vercel env add VITE_API_URL production      # paste: $burl"
   say "    vercel --prod"
   say ""

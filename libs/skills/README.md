@@ -4,9 +4,8 @@ Shared **skill framework** for the QuantAgent stack. A skill is a self-contained
 capability — write a research report, compare tickers, explain a filing — that
 any consumer in the project can invoke.
 
-> Part of the [QuantAgent](https://github.com/ZeroNoise2026/QuantAgent) stack.
-> You do not clone this repo directly: clone QuantAgent and run `./dev.sh`,
-> which pulls this one as a sibling.
+> Part of the QuantAgent monorepo. Run `./dev.sh` from the repo root — it sets
+> up this directory's venv and `.env`.
 
 > **For PMs / analysts:** this is where reusable analyst workflows live. Today
 > there are two — a single-ticker research report and a multi-ticker
@@ -20,7 +19,7 @@ any consumer in the project can invoke.
 ## Layout
 
 ```
-Skills/                       <- the repo (clone dir name is irrelevant)
+libs/skills/                  <- this directory
 ├── pyproject.toml            packaging; declares the `skills` package
 ├── .github/workflows/ci.yml  import guard on Linux + offline suite
 └── skills/                   <- THE IMPORTABLE PACKAGE
@@ -36,38 +35,26 @@ Skills/                       <- the repo (clone dir name is irrelevant)
 
 ### Why the package sits in a subdirectory
 
-It used to live at the repo root, which made the importable package name
-whatever `git clone` happened to produce — `Skills`. Every call site imports
-lowercase `skills`, so it only ever worked on case-insensitive filesystems
-(macOS). On Linux, Docker and CI the import failed and callers silently
-degraded to their fallback path.
-
-Renaming the folder is not a fix: **git does not track the clone directory
-name**, so it reverts on the next clone. Moving the package into a tracked
-`skills/` subdirectory fixes it permanently, and makes the repo pip-installable
-as a bonus. `.github/workflows/ci.yml` checks out into a directory literally
-named `Skills` on ubuntu and asserts `import skills` still resolves, so the bug
-cannot come back unnoticed.
+The importable package is the tracked `skills/` directory, not the folder that
+contains it, so `import skills` resolves the same way on every filesystem and
+the directory is pip-installable. `.github/workflows/skills-ci.yml` asserts on
+case-sensitive ubuntu that `import skills` resolves and the registry is
+populated.
 
 ## Install
 
 ```bash
-pip install -e /path/to/Skills          # editable, for development
-pip install "git+https://github.com/ZeroNoise2026/Skills.git@main"
+pip install -e libs/skills          # from the repo root; editable
 ```
 
-`./dev.sh setup` in QuantAgent does the editable install automatically, which
-overrides the git pin in `QuantAgent/backend/requirements.txt` so local edits
-take effect without a push.
-
-Without installing, adding the repo root to `sys.path` also works — that is
-what the consumers do when they find a local clone.
+`./dev.sh setup` does the editable install into the backend venv
+automatically; `apps/backend/Dockerfile` installs it from the same checkout.
 
 ## Available skills
 
 | Name | Purpose | Required args | Returns |
 |---|---|---|---|
-| `generate_report` | Full investment-analysis report for one ticker | `ticker: str` | Markdown + artifact at `Summarization/output/{TICKER}_{DATE}.md` |
+| `generate_report` | Full investment-analysis report for one ticker | `ticker: str` | Markdown + artifact at `apps/summarization/output/{TICKER}_{DATE}.md` |
 | `compare_tickers` | Side-by-side comparison of 2+ tickers | `tickers: list[str]` | Markdown (no artifact) |
 
 ## Usage
@@ -84,7 +71,7 @@ if decision.skill:
     result = get_skill(decision.skill).run(**decision.args)
 ```
 
-From the Summarization CLI:
+From the summary CLI (`apps/summarization`):
 
 ```bash
 python -m summary.run --list-skills
@@ -171,21 +158,16 @@ python -m skills.tests.test_router_prompt  # print the router prompt, send nothi
 python -m skills.tests.test_live_router    # real Claude call; needs the key
 ```
 
-CI runs the first one on ubuntu plus an import guard. The smoke suite skips its
-cross-repo CLI test when the sibling `Summarization` repo is not checked out, so
-a standalone clone still passes.
+CI runs the first one on ubuntu plus an import guard.
 
-## Cross-repo paths
+## Reaching into apps/summarization (known rule violation)
 
-`generate_report` and `compare_tickers` reach into the sibling `Summarization`
-repo for data and LLM access, via
-`Path(__file__).resolve().parents[3] / "Summarization"`. That depth assumes:
-
-```
-<workspace>/Skills/skills/<skill_name>/skill.py
-```
-
-If a file here ever moves up or down a level, that constant moves with it.
+`generate_report` and `compare_tickers` reach into `apps/summarization` for data
+and LLM access, via
+`Path(__file__).resolve().parents[4] / "apps" / "summarization"`. That breaks
+the monorepo rule (apps never get imported by libs) and is slated to go: the
+shared pieces move into `libs/`, or these two skills move into the app that
+owns them.
 
 ## Design notes
 
@@ -197,7 +179,7 @@ If a file here ever moves up or down a level, that constant moves with it.
 - **No persistence.** Results go back to the caller; there is no `skill_runs`
   table. `SkillResult.artifacts` is the escape hatch for skills that write files.
 - **`_llm.py` is the survivor.** Two near-identical Claude wrappers exist
-  elsewhere (`Summarization/shared/llm.py`, `QuantAgent/backend/summarizer.py`).
+  elsewhere (`apps/summarization/shared/llm.py`, `apps/backend/summarizer.py`).
   When those three are consolidated, this is the one to keep.
 
 ## Known tech debt
@@ -208,5 +190,5 @@ If a file here ever moves up or down a level, that constant moves with it.
 - The Claude client is duplicated in three places (see above).
 - `compare_tickers` lets the LLM build the metrics table. More robust would be
   to assemble it deterministically from `earnings` / `price_snapshot` and let the
-  LLM write only the prose around it — the pattern `Summarization/question`
+  LLM write only the prose around it — the pattern `apps/summarization/question`
   already uses.

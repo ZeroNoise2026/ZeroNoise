@@ -18,29 +18,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout data-pipeline
+      - name: Checkout
         uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
+          cache-dependency-path: |
+            apps/pipeline/requirements.txt
+            apps/embedding/requirements.txt
 
       - name: Install pipeline deps
-        run: pip install -r requirements.txt
+        run: pip install -r apps/pipeline/requirements.txt
 
-      # ── embedding-service ──────────────────────────────────────
-      - name: Checkout embedding-service
-        uses: actions/checkout@v4
-        with:
-          repository: ZeroNoise2026/embedding-service
-          path: embedding-service
+      # ── embedding service ──────────────────────────────────────
+      - name: Install embedding deps
+        run: pip install -r apps/embedding/requirements.txt
 
-      - name: Install embedding-service deps
-        run: pip install -r embedding-service/requirements.txt
-
-      - name: Start embedding-service
-        working-directory: embedding-service
+      - name: Start embedding service
+        working-directory: apps/embedding
         run: uvicorn app.main:app --port 8002 &
 
       - name: Wait for embedding-service
@@ -54,4 +51,5 @@ jobs:
 
       # ── run pipeline ───────────────────────────────────────────
       - name: Run ingestion pipeline
+        working-directory: apps/pipeline
         run: python -m pipeline.run

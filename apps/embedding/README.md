@@ -7,9 +7,8 @@ stateless, and the **only service in the stack that needs no external
 credentials** — which makes it the first thing worth starting when you are
 checking whether your setup works at all.
 
-> Part of the [QuantAgent](https://github.com/ZeroNoise2026/QuantAgent) stack.
-> You do not clone this repo directly: clone QuantAgent and run `./dev.sh`,
-> which pulls this one as a sibling and sets up its venv and `.env`.
+> Part of the QuantAgent monorepo. Run `./dev.sh` from the repo root — it sets
+> up this directory's venv and `.env`.
 
 ## Why it is a separate service
 
@@ -85,8 +84,8 @@ model-load cost on the request path.
 
 | Service | How it calls this one |
 |---|---|
-| [data-pipeline](https://github.com/ZeroNoise2026/data-pipeline) | `POST /api/encode` for every batch of chunks at ingest, 100 per request |
-| [Summarization](https://github.com/ZeroNoise2026/Summarization) (`question`) | `POST /api/encode-query` per user query; also `/api/encode` to batch-encode expanded queries for multi-vector retrieval |
+| [pipeline](../pipeline) | `POST /api/encode` for every batch of chunks at ingest, 100 per request |
+| [summarization](../summarization) (`question`) | `POST /api/encode-query` per user query; also `/api/encode` to batch-encode expanded queries for multi-vector retrieval |
 
 Both reach it via `EMBEDDING_SERVICE_URL`, default `http://localhost:8002`.
 Neither has a fallback: if this service is down, ingestion stops and RAG

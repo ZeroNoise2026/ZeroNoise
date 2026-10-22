@@ -1,8 +1,17 @@
-venv
-__pycache__
-*.pyc
-.env
-.env.*
+# Applies to images built from the repo root (currently: backend).
+# Apps built from their own directory use that directory's .dockerignore.
+**/venv
+**/.venv
+**/node_modules
+**/__pycache__
+**/*.pyc
+**/.env
+**/.env.*
+!**/.env.example
 .git
-.gitignore
-.DS_Store
+**/.gitignore
+**/.DS_Store
+**/output
+.devstack
+.deploy
+apps/web
