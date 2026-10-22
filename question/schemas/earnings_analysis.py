@@ -5,7 +5,7 @@ EARNINGS_ANALYSIS — LLM-involved (narrative only); all numbers computed determ
 Flow:
   1. build_context(ticker, earnings) — compute from DB earnings rows:
        revenue_yoy / revenue_qoq / eps_yoy / eps_qoq / earnings_table / latest_*
-  2. kimi_structured.generate(SYSTEM_PROMPT, user_query, context_summary, SCHEMA)
+  2. structured.generate_json(SYSTEM_PROMPT, user_query, context_summary, SCHEMA)
      → produces {"headline": str, "narrative": str, "key_drivers": [str,...]}
   3. render(TEMPLATE, {...context, **llm_output}) — final Markdown
 """

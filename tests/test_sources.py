@@ -4,7 +4,7 @@ Run from Summarization/:
     python -m tests.test_sources
 
 Strategy: monkeypatch router/retrieve/generator/structured-gen so we never
-hit Supabase or KIMI. We only assert the orchestrator's outgoing event
+hit Supabase or the LLM. We only assert the orchestrator's outgoing event
 sequence contains a `sources` event with the expected shape.
 """
 from __future__ import annotations
@@ -15,7 +15,7 @@ import os
 # Stub env early so imports don't fail
 os.environ.setdefault("SUPABASE_URL", "http://stub")
 os.environ.setdefault("SUPABASE_KEY", "stub")
-os.environ.setdefault("MOONSHOT_API_KEY", "stub")
+os.environ.setdefault("ANTHROPIC_API_KEY", "stub")
 os.environ.setdefault("EMBEDDING_SERVICE_URL", "http://stub:8002")
 
 from question import orchestrator as orch  # noqa: E402

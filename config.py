@@ -4,7 +4,7 @@ All environment variables for the Summarization repo — single source of truth.
 
 Sections:
   1. Supabase (shared)
-  2. Moonshot / KIMI (shared)
+  2. Anthropic / Claude (shared)
   3. Summary-service settings
   4. Question-service settings
   5. Upstream service URLs
@@ -25,15 +25,15 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
 # ═══════════════════════════════════════════
-# 2. Moonshot / KIMI credentials (shared)
+# 2. Anthropic / Claude credentials (shared)
 # ═══════════════════════════════════════════
-MOONSHOT_API_KEY = os.getenv("MOONSHOT_API_KEY")
-MOONSHOT_BASE_URL = os.getenv("MOONSHOT_BASE_URL", "https://api.moonshot.ai/v1")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 
 # ═══════════════════════════════════════════
 # 3. Summary-service settings
 # ═══════════════════════════════════════════
-MOONSHOT_MODEL = os.getenv("MOONSHOT_MODEL", "kimi-k2.5")
+LLM_MODEL_SUMMARY = os.getenv("LLM_MODEL_SUMMARY", "claude-sonnet-5-5")
+LLM_EFFORT_SUMMARY = os.getenv("LLM_EFFORT_SUMMARY", "high")
 MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "380000"))
 OUTPUT_DIR = Path(__file__).parent / "output"
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -41,10 +41,12 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # ═══════════════════════════════════════════
 # 4. Question-service LLM settings
 # ═══════════════════════════════════════════
-KIMI_MODEL_QA: str = os.getenv("KIMI_MODEL_QA", "kimi-k2.5")
-KIMI_MODEL_CLASSIFY: str = os.getenv("KIMI_MODEL_CLASSIFY", "moonshot-v1-8k")
-LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.3"))
-LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "4096"))
+LLM_MODEL_QA: str = os.getenv("LLM_MODEL_QA", "claude-haiku-5-5")
+LLM_MODEL_CLASSIFY: str = os.getenv("LLM_MODEL_CLASSIFY", "claude-haiku-5-5")
+# "low" | "medium" | "high" — thinking depth vs. latency for the QA stream
+LLM_EFFORT_QA: str = os.getenv("LLM_EFFORT_QA", "medium")
+# Includes thinking tokens, so keep well above the expected answer length
+LLM_MAX_TOKENS: int = int(os.getenv("LLM_MAX_TOKENS", "16000"))
 
 # ═══════════════════════════════════════════
 # 5. Upstream service URLs

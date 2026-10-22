@@ -1,157 +1,220 @@
 """
 shared/llm.py
-Shared KIMI (Moonshot) LLM client — singleton + retry logic.
+Shared Claude (Anthropic) LLM client — singleton + retry logic.
 
 Used by:
-  - summary/summarizer.py  (report generation, kimi-k2.5, temp=1.0)
-  - question/generator.py  (QA generation, kimi-k2.5, temp=1.0)
-  - question/router.py     (L2 classification, moonshot-v1-8k, temp=0, max_tokens=150)
+  - summary/summarizer.py   (report generation, LLM_MODEL_SUMMARY)
+  - question/generator.py   (QA generation, LLM_MODEL_QA, streaming)
+  - question/router.py      (L2 classification, LLM_MODEL_CLASSIFY)
+  - question/structured.py  (JSON generation, LLM_MODEL_QA)
 
-Note: kimi-k2.5 is a reasoning model — only accepts temperature=1.
+Callers pass OpenAI-style messages ([{"role": "system"|"user"|"assistant", ...}]);
+split_messages() lifts system turns into Claude's top-level `system` field.
+
+Note: current Claude models reject non-default temperature, so there is no
+temperature knob — use `effort` ("low" | "medium" | "high") to trade depth
+for latency. Thinking tokens count against max_tokens, so leave headroom.
 """
 
 import logging
 import time
-from typing import Generator, Optional
+from typing import Any, Generator, Optional
 
-from openai import OpenAI, RateLimitError, APITimeoutError, APIConnectionError, AuthenticationError
+import anthropic
 
-from config import MOONSHOT_API_KEY, MOONSHOT_BASE_URL
+from config import ANTHROPIC_API_KEY
 
 logger = logging.getLogger(__name__)
 
-# ── Dynamic model selection ──────────────────────────────────────────────────
-# Ordered small → large. ~4 chars ≈ 1 token, leave 20% headroom for output.
-_MODEL_TIERS = [
-    ("moonshot-v1-8k",   8_000 * 4 * 0.8),    # ≤ ~25,600 chars
-    ("moonshot-v1-32k",  32_000 * 4 * 0.8),    # ≤ ~102,400 chars
-    ("moonshot-v1-128k", 128_000 * 4 * 0.8),   # ≤ ~409,600 chars
-    ("kimi-k2.5",        float("inf")),         # fallback, largest context
-]
+# Models that support server-side refusal fallback (`fallbacks: "default"`).
+# Haiku has no server-side fallback — refusals surface as LLMRefusal instead.
+_FALLBACK_MODEL_PREFIXES = ("claude-sonnet-5-5", "claude-opus-5", "claude-fable-5-1")
+_FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+_REFUSAL_TEXT = "[The AI model declined to answer this question. Please rephrase and try again.]"
 
 
-def pick_model(prompt_chars: int) -> str:
-    """Pick the smallest Moonshot model that fits the prompt length."""
-    for model, max_chars in _MODEL_TIERS:
-        if prompt_chars <= max_chars:
-            return model
-    return _MODEL_TIERS[-1][0]
+class LLMRefusal(RuntimeError):
+    """Claude declined the request (stop_reason == "refusal")."""
 
 
-_client: Optional[OpenAI] = None
+_client: Optional[anthropic.Anthropic] = None
 
 
-def get_client() -> OpenAI:
-    """Lazy singleton — one OpenAI client shared across the entire process."""
+def get_client() -> anthropic.Anthropic:
+    """Lazy singleton — one Anthropic client shared across the entire process."""
     global _client
     if _client is None:
-        if not MOONSHOT_API_KEY:
-            raise ValueError("MOONSHOT_API_KEY is not set. Check your .env file.")
-        _client = OpenAI(
-            api_key=MOONSHOT_API_KEY,
-            base_url=MOONSHOT_BASE_URL,
-        )
+        if not ANTHROPIC_API_KEY:
+            raise ValueError("ANTHROPIC_API_KEY is not set. Check your .env file.")
+        # Retries are handled below so they can be audited; disable SDK retries
+        # to avoid compounding attempts.
+        _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, max_retries=0)
     return _client
 
 
 def has_api_key() -> bool:
-    """Check if MOONSHOT_API_KEY is configured (without raising)."""
-    return bool(MOONSHOT_API_KEY)
+    """Check if ANTHROPIC_API_KEY is configured (without raising)."""
+    return bool(ANTHROPIC_API_KEY)
+
+
+def split_messages(messages: list[dict]) -> tuple[Optional[str], list[dict]]:
+    """Split OpenAI-style messages into (system_prompt, user/assistant turns)."""
+    system_parts = [m["content"] for m in messages if m["role"] == "system"]
+    turns = [{"role": m["role"], "content": m["content"]} for m in messages if m["role"] != "system"]
+    return ("\n\n".join(system_parts) or None), turns
+
+
+def build_request(
+    messages: list[dict],
+    model: str,
+    max_tokens: int,
+    effort: str,
+    output_schema: Optional[dict] = None,
+    show_thinking: bool = False,
+) -> tuple[Any, dict]:
+    """Build (messages_resource, kwargs) for a Messages API call.
+
+    Returns the beta resource when the model supports server-side refusal
+    fallback, so callers can do `resource.create(**kwargs)` / `.stream(**kwargs)`.
+    """
+    client = get_client()
+    system, turns = split_messages(messages)
+
+    kwargs: dict[str, Any] = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": turns,
+        "output_config": {"effort": effort},
+    }
+    if system:
+        # System prompts are stable per call site — cache them.
+        kwargs["system"] = [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}]
+    if output_schema is not None:
+        kwargs["output_config"]["format"] = {"type": "json_schema", "schema": output_schema}
+    if show_thinking:
+        kwargs["thinking"] = {"type": "adaptive", "display": "summarized"}
+
+    if model.startswith(_FALLBACK_MODEL_PREFIXES):
+        kwargs["betas"] = [_FALLBACK_BETA]
+        kwargs["fallbacks"] = "default"
+        return client.beta.messages, kwargs
+    return client.messages, kwargs
+
+
+def usage_dict(usage: Any) -> dict:
+    """Normalize Claude usage into the prompt/completion/total shape callers expect."""
+    prompt = (
+        (usage.input_tokens or 0)
+        + (getattr(usage, "cache_read_input_tokens", 0) or 0)
+        + (getattr(usage, "cache_creation_input_tokens", 0) or 0)
+    )
+    completion = usage.output_tokens or 0
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": prompt + completion,
+        "cache_read_tokens": getattr(usage, "cache_read_input_tokens", 0) or 0,
+    }
+
+
+def response_text(response: Any) -> str:
+    """Concatenate the text blocks of a response (skips thinking/fallback blocks)."""
+    return "".join(b.text for b in response.content if b.type == "text")
+
+
+def _is_retryable(e: Exception) -> bool:
+    if isinstance(e, (anthropic.RateLimitError, anthropic.APITimeoutError, anthropic.APIConnectionError)):
+        return True
+    return isinstance(e, anthropic.APIStatusError) and e.status_code >= 500
+
+
+def _backoff(e: Exception, attempt: int) -> int:
+    if isinstance(e, anthropic.RateLimitError):
+        return min(2 ** attempt * 10, 60)
+    return 2 ** attempt * 5
 
 
 def chat(
     messages: list[dict],
     model: str,
-    temperature: float = 0.3,
-    max_tokens: Optional[int] = None,
+    max_tokens: int = 16000,
+    effort: str = "medium",
+    output_schema: Optional[dict] = None,
     max_retries: int = 3,
     timeout: Optional[float] = None,
+    service: str = "question",
 ) -> tuple[str, dict]:
-    """Send a chat completion request with retry logic.
+    """Send a Messages API request with retry logic.
 
     Args:
-        messages: OpenAI-format messages [{"role": ..., "content": ...}]
-        model: Model name (e.g. "moonshot-v1-8k", "moonshot-v1-128k")
-        temperature: Sampling temperature
-        max_tokens: Max tokens in response (None = model default)
-        max_retries: Number of retry attempts for rate-limit / connection errors
+        messages: OpenAI-style messages [{"role": ..., "content": ...}]
+        model: Claude model ID (e.g. "claude-haiku-5-5")
+        max_tokens: Max output tokens, thinking included
+        effort: "low" | "medium" | "high" — thinking depth / latency trade-off
+        output_schema: JSON schema to constrain the response (structured outputs)
+        max_retries: Number of attempts for rate-limit / connection / 5xx errors
         timeout: Request timeout in seconds (None = client default)
+        service: Audit-log service label
 
     Returns:
         (content, usage_dict) where usage_dict has prompt_tokens, completion_tokens, total_tokens
+
+    Raises:
+        LLMRefusal if Claude declines the request.
     """
-    client = get_client()
-
-    # kimi-k2.5 only accepts temperature=1
-    if "kimi-k2" in model:
-        temperature = 1.0
-
-    kwargs = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-    }
-    if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
+    resource, kwargs = build_request(messages, model, max_tokens, effort, output_schema)
     if timeout is not None:
         kwargs["timeout"] = timeout
+
+    from audit import log_api_call
 
     for attempt in range(1, max_retries + 1):
         t0 = time.time()
         try:
-            response = client.chat.completions.create(**kwargs)
+            response = resource.create(**kwargs)
             latency = int((time.time() - t0) * 1000)
-            content = response.choices[0].message.content
-            usage = response.usage
-            usage_dict = {
-                "prompt_tokens": usage.prompt_tokens,
-                "completion_tokens": usage.completion_tokens,
-                "total_tokens": usage.total_tokens,
-            }
+            usage = usage_dict(response.usage)
             logger.info(
-                f"LLM call done: model={model}, "
-                f"prompt={usage.prompt_tokens}, completion={usage.completion_tokens}, "
-                f"total={usage.total_tokens}"
+                f"LLM call done: model={response.model}, stop={response.stop_reason}, "
+                f"prompt={usage['prompt_tokens']} (cached={usage['cache_read_tokens']}), "
+                f"completion={usage['completion_tokens']}"
             )
-            # Audit
-            from audit import log_api_call
             log_api_call(
-                service="summary" if "128k" in model else "question",
-                api_type="kimi_llm",
-                endpoint="chat.completions",
-                model=model,
-                tokens_in=usage.prompt_tokens,
-                tokens_out=usage.completion_tokens,
-                tokens_total=usage.total_tokens,
+                service=service,
+                api_type="claude_llm",
+                endpoint="messages",
+                model=response.model,
+                tokens_in=usage["prompt_tokens"],
+                tokens_out=usage["completion_tokens"],
+                tokens_total=usage["total_tokens"],
                 latency_ms=latency,
             )
-            return content, usage_dict
+            if response.stop_reason == "refusal":
+                raise LLMRefusal(f"model={response.model} declined the request")
+            if response.stop_reason == "max_tokens":
+                logger.warning(f"LLM output truncated at max_tokens={max_tokens} (model={model})")
+            return response_text(response), usage
 
-        except RateLimitError as e:
-            latency = int((time.time() - t0) * 1000)
-            wait = min(2 ** attempt * 10, 60)
-            logger.warning(f"Rate limited (attempt {attempt}/{max_retries}), waiting {wait}s: {e}")
-            from audit import log_api_call
-            log_api_call(
-                service="summary" if "128k" in model else "question",
-                api_type="kimi_llm", endpoint="chat.completions", model=model,
-                latency_ms=latency, status="rate_limited", error_msg=str(e)[:200],
-            )
-            time.sleep(wait)
-
-        except (APITimeoutError, APIConnectionError) as e:
-            wait = 2 ** attempt * 5
-            logger.warning(f"Connection issue (attempt {attempt}/{max_retries}), retrying in {wait}s: {e}")
-            time.sleep(wait)
-
-        except AuthenticationError as e:
+        except anthropic.AuthenticationError as e:
             # Invalid/placeholder API key — don't retry, just raise
             logger.warning(f"LLM authentication failed (invalid API key): {e}")
             raise
 
         except Exception as e:
-            logger.error(f"Unexpected LLM error: {e}")
-            raise
+            if not _is_retryable(e) or attempt == max_retries:
+                if _is_retryable(e):
+                    log_api_call(
+                        service=service, api_type="claude_llm", endpoint="messages", model=model,
+                        latency_ms=int((time.time() - t0) * 1000),
+                        status="rate_limited" if isinstance(e, anthropic.RateLimitError) else "error",
+                        error_msg=str(e)[:200],
+                    )
+                    break
+                raise
+            wait = _backoff(e, attempt)
+            logger.warning(f"{type(e).__name__} (attempt {attempt}/{max_retries}), retrying in {wait}s: {e}")
+            time.sleep(wait)
 
     raise RuntimeError(f"LLM call failed after {max_retries} attempts (model={model})")
 
@@ -159,80 +222,69 @@ def chat(
 def chat_stream(
     messages: list[dict],
     model: str,
-    temperature: float = 0.3,
-    max_tokens: Optional[int] = None,
+    max_tokens: int = 16000,
+    effort: str = "medium",
+    show_thinking: bool = True,
     max_retries: int = 3,
 ) -> Generator[tuple, None, None]:
-    """Send a streaming chat completion request — yields (type, text) tuples.
+    """Send a streaming Messages API request — yields (type, text) tuples.
 
     Tuple types:
-      ("thinking", text) — reasoning tokens (kimi-k2.5 reasoning_content)
+      ("thinking", text) — summarized reasoning (when show_thinking=True)
       ("token", text)    — final answer content tokens
 
-    Retries on RateLimitError (429) up to max_retries times.
+    Retries on transient errors only while nothing has been yielded yet, so a
+    mid-stream failure never duplicates output. Errors are yielded as a final
+    token instead of raised — avoids async/sync generator exception
+    propagation issues with ASGI.
     """
-    client = get_client()
+    resource, kwargs = build_request(messages, model, max_tokens, effort, show_thinking=show_thinking)
 
-    # kimi-k2.5 only accepts temperature=1
-    if "kimi-k2" in model:
-        temperature = 1.0
-
-    kwargs = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "stream": True,
-    }
-    if max_tokens is not None:
-        kwargs["max_tokens"] = max_tokens
+    from audit import log_api_call
 
     for attempt in range(1, max_retries + 1):
+        emitted = False
+        t0 = time.time()
         try:
-            response = client.chat.completions.create(**kwargs)
+            with resource.stream(**kwargs) as stream:
+                for event in stream:
+                    if event.type != "content_block_delta":
+                        continue
+                    if event.delta.type == "thinking_delta" and event.delta.thinking:
+                        emitted = True
+                        yield ("thinking", event.delta.thinking)
+                    elif event.delta.type == "text_delta" and event.delta.text:
+                        emitted = True
+                        yield ("token", event.delta.text)
+                final = stream.get_final_message()
 
-            t0 = time.time()
-            for chunk in response:
-                if chunk.choices and chunk.choices[0].delta:
-                    delta = chunk.choices[0].delta
-                    # kimi-k2.5: reasoning_content chunks arrive first, then content
-                    reasoning = getattr(delta, 'reasoning_content', None) or ''
-                    content = delta.content or ''
-                    if reasoning:
-                        yield ("thinking", reasoning)
-                    if content:
-                        yield ("token", content)
-
-            latency = int((time.time() - t0) * 1000)
-            from audit import log_api_call
+            usage = usage_dict(final.usage)
             log_api_call(
                 service="question",
-                api_type="kimi_llm",
-                endpoint="chat.completions.stream",
-                model=model,
-                latency_ms=latency,
+                api_type="claude_llm",
+                endpoint="messages.stream",
+                model=final.model,
+                tokens_in=usage["prompt_tokens"],
+                tokens_out=usage["completion_tokens"],
+                tokens_total=usage["total_tokens"],
+                latency_ms=int((time.time() - t0) * 1000),
             )
+            if final.stop_reason == "refusal":
+                yield ("token", "\n\n" + _REFUSAL_TEXT if emitted else _REFUSAL_TEXT)
             return  # success — exit retry loop
 
-        except RateLimitError as e:
-            wait = min(2 ** attempt * 10, 60)
-            logger.warning(f"Stream rate limited (attempt {attempt}/{max_retries}), waiting {wait}s: {e}")
-            from audit import log_api_call
-            log_api_call(
-                service="question",
-                api_type="kimi_llm", endpoint="chat.completions.stream", model=model,
-                status="rate_limited", error_msg=str(e)[:200],
-            )
-            if attempt == max_retries:
-                # Yield error token instead of raising — avoids async/sync
-                # generator exception propagation issues with ASGI.
-                yield ("token", "[Error: The AI model is rate-limited (Tier 0: RPM=3, concurrent=1). Please wait 20-30 seconds and try again.]")
+        except Exception as e:
+            logger.warning(f"Stream {type(e).__name__} (attempt {attempt}/{max_retries}): {e}")
+            if isinstance(e, anthropic.RateLimitError):
+                log_api_call(
+                    service="question",
+                    api_type="claude_llm", endpoint="messages.stream", model=model,
+                    status="rate_limited", error_msg=str(e)[:200],
+                )
+            if emitted or not _is_retryable(e) or attempt == max_retries:
+                if isinstance(e, anthropic.RateLimitError):
+                    yield ("token", "[Error: The AI model is rate-limited. Please wait a moment and try again.]")
+                else:
+                    yield ("token", "[Error: Connection to AI model failed. Please try again.]")
                 return
-            time.sleep(wait)
-
-        except (APITimeoutError, APIConnectionError) as e:
-            wait = 2 ** attempt * 5
-            logger.warning(f"Stream connection issue (attempt {attempt}/{max_retries}), retrying in {wait}s: {e}")
-            if attempt == max_retries:
-                yield ("token", "[Error: Connection to AI model failed after retries. Please try again.]")
-                return
-            time.sleep(wait)
+            time.sleep(_backoff(e, attempt))

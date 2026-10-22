@@ -1,7 +1,7 @@
-# Shared (Supabase + KIMI)
+# Shared (Supabase + Claude)
 supabase
 python-dotenv
-openai>=1.40.0
+anthropic>=2.1.0
 
 # question service
 fastapi==0.104.1

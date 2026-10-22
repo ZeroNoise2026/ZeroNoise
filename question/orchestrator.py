@@ -118,7 +118,7 @@ async def _structured_earnings_response(query: str, tickers: list[str], target_q
     """Path A for EARNINGS_ANALYSIS. Raises _StructuredFallback on any failure."""
     from question.schemas import earnings_analysis as EA
     from question.templates import render, RenderError
-    from question.kimi_structured import generate_json, StructuredGenError
+    from question.structured import generate_json, StructuredGenError
 
     parts: list[str] = []
     for ticker in tickers:
@@ -145,7 +145,7 @@ async def _structured_earnings_response(query: str, tickers: list[str], target_q
                 intent_label=f"earnings:{ticker}",
             )
         except StructuredGenError as e:
-            raise _StructuredFallback(f"KIMI structured gen failed: {e}")
+            raise _StructuredFallback(f"LLM structured gen failed: {e}")
 
         try:
             ctx = EA.build_context(
@@ -170,7 +170,7 @@ async def _structured_comparison_response(query: str, tickers: list[str], target
     """Path A for COMPARISON. Raises _StructuredFallback on any failure."""
     from question.schemas import comparison as CMP
     from question.templates import render, RenderError
-    from question.kimi_structured import generate_json, StructuredGenError
+    from question.structured import generate_json, StructuredGenError
 
     per_ticker = {t: get_earnings(t, limit=8) for t in tickers}
     missing = [t for t, r in per_ticker.items() if not r]
@@ -197,7 +197,7 @@ async def _structured_comparison_response(query: str, tickers: list[str], target
             max_tokens=1500,
         )
     except StructuredGenError as e:
-        raise _StructuredFallback(f"KIMI structured gen failed: {e}")
+        raise _StructuredFallback(f"LLM structured gen failed: {e}")
 
     try:
         ctx = CMP.build_context(
@@ -377,9 +377,9 @@ async def handle_ask_stream(req: AskRequest):
     yield ("status", "🤖 Generating answer...")
 
     # Stream generation — run sync generator in thread to avoid blocking event loop.
-    # kimi-k2.5 is a reasoning model: ~60s of reasoning chunks (no content)
-    # followed by content chunks. Without threading, the sync for loop blocks
-    # the event loop, causing SSE connections to die.
+    # The model may stream thinking chunks before content chunks. Without
+    # threading, the sync for loop blocks the event loop, causing SSE
+    # connections to die.
     q: queue.Queue = queue.Queue()
     SENTINEL = object()
 
