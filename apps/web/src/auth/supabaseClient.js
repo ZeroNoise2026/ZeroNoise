@@ -11,7 +11,7 @@ if (!url || !key) {
     // eslint-disable-next-line no-console
     console.error(
         '[supabase] Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY. ' +
-        'Copy frontend/.env.example to frontend/.env.local and fill in.',
+        'Add them to the repo-root .env.',
     )
 }
 

@@ -15,17 +15,14 @@ from __future__ import annotations
 
 import os
 import sys
-from pathlib import Path
 
-# Pull ANTHROPIC_API_KEY from the central secrets file that ./dev.sh manages.
+# Pull ANTHROPIC_API_KEY from the repo-root .env (searched upward from here).
 try:
     from dotenv import load_dotenv
 except ImportError:
     print("python-dotenv not installed; assuming env is already loaded")
 else:
-    env_path = Path(os.getenv("QUANT_SECRETS_FILE", Path.home() / ".config/quantagent/secrets.env"))
-    if env_path.exists():
-        load_dotenv(env_path)
+    load_dotenv()
 
 
 def main() -> int:

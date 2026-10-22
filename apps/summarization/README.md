@@ -4,7 +4,7 @@ Two co-located entry points: the `summary` report CLI and the `question` RAG
 service.
 
 > Part of the zeroNoise monorepo. Run `./dev.sh` from the repo root — it sets
-> up this directory's venv and `.env`.
+> up this directory's venv. Configuration comes from the single repo-root `.env`.
 
 | Service | Form | Purpose |
 |---|---|---|
@@ -43,7 +43,7 @@ service.
 
 ```
 apps/summarization/
-├── config.py                  app settings (loads .env)
+├── config.py                  app settings (loads the repo-root .env)
 ├── summary/                   ── report CLI ──
 │   ├── run.py                 python -m summary.run (reports or --skill)
 │   └── cleanup.py             summary_cache retention sweep
@@ -73,7 +73,7 @@ Handled by `./dev.sh setup question` from the repo root. Manually:
 ```bash
 python3 -m venv venv && source venv/bin/activate
 pip install -r requirements.txt -e ../../libs/common -e ../../libs/research -e ../../libs/skills
-cp .env.example .env        # then fill in credentials
+cp ../../.env.example ../../.env   # once, at the repo root; then fill in credentials
 ```
 
 Prerequisites: Python 3.11+, a Supabase project with
@@ -102,7 +102,7 @@ no LLM call.
 uvicorn question.main:app --port 8003 --reload
 
 docker build -f apps/summarization/Dockerfile.question -t qa-question ../..   # repo-root context
-docker run -p 8003:8080 --env-file .env qa-question
+docker run -p 8003:8080 --env-file ../../.env qa-question
 ```
 
 | Method | Path | Description |

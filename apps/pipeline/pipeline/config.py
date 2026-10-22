@@ -5,9 +5,13 @@ Load all service URLs, API keys, and credentials from .env file.
 
 import os
 import logging
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+# The single repo-root .env: the nearest .env above this file. Real environment
+# variables (Cloud Run) win; in a container there is no file and this is a no-op.
+load_dotenv(next((d / ".env" for d in Path(__file__).resolve().parents if (d / ".env").is_file()), None))
 
 # ── API Keys ──────────────────────────────────────────────────────────────────
 

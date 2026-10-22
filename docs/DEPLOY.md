@@ -1,7 +1,7 @@
 # Deployment
 
 `dev.sh` runs the stack on your laptop. `deploy.sh` runs it on GCP, from the
-same repos, the same `.env` files and the same service registry.
+same monorepo, the same `.env` and the same service registry.
 
 ```bash
 ./deploy.sh preflight     # what is ready, what is blocked, and why
@@ -31,7 +31,7 @@ gcloud auth login
 gcloud config set project <your-project-id>
 
 ./deploy.sh bootstrap     # APIs, Artifact Registry, one service account per service
-./deploy.sh secrets       # reads your local .env files, writes Secret Manager
+./deploy.sh secrets       # reads the repo-root .env, writes Secret Manager
 ./deploy.sh deploy
 ./deploy.sh frontend      # prints the Vercel side
 ```
@@ -52,8 +52,7 @@ Three kinds of configuration, kept deliberately separate:
 **Secrets** live in Secret Manager and are mounted at runtime — they never
 appear in a revision spec, so `gcloud run services describe` is safe to paste
 into a chat. `./deploy.sh secrets` reads the authoritative value from the
-central secrets file (`~/.config/quantagent/secrets.env`, managed by
-`./dev.sh secrets`) and adds a new version only when it actually changed.
+repo-root `.env` and adds a new version only when it actually changed.
 
 | Secret | Used by |
 |---|---|
@@ -62,13 +61,11 @@ central secrets file (`~/.config/quantagent/secrets.env`, managed by
 | `ANTHROPIC_API_KEY` | backend, question |
 | `FINNHUB_API_KEY` `FMP_API_KEY` | pipeline |
 
-One secret, many consumers. Edit credentials only in the central file;
-`./dev.sh secrets apply` copies them into each service `.env`, so the copies
-can't drift apart. On a new machine, `./dev.sh secrets pull` rebuilds the
-central file from Secret Manager.
+One secret, many consumers, one local file. On a new machine,
+`./dev.sh env pull` fills `.env` back in from Secret Manager.
 
 **Plain config** (`SUPABASE_URL`, model names, `ALLOWED_ORIGINS`, …) is copied
-verbatim from each service's `.env` at deploy time.
+verbatim from the repo-root `.env` at deploy time.
 
 **Service URLs** are never written down. `EMBEDDING_SERVICE_URL`,
 `QUESTION_SERVICE_URL` and `DATA_PIPELINE_URL` are resolved from what is
@@ -112,7 +109,7 @@ Two directions to wire, and both are easy to forget:
 - **Vercel → backend**: `VITE_API_URL`. Baked in at *build* time, so changing it
   needs a redeploy, not a restart.
 - **backend → Vercel**: `ALLOWED_ORIGINS`. `./deploy.sh cors` sets it plus a
-  regex for preview deploys. Mirror it into `apps/backend/.env` so the next full
+  regex for preview deploys. Mirror it into `.env` so the next full
   deploy does not drop it.
 
 ## Rolling back

@@ -5,7 +5,7 @@ capability — write a research report, compare tickers, explain a filing — th
 any consumer in the project can invoke.
 
 > Part of the zeroNoise monorepo. Run `./dev.sh` from the repo root — it sets
-> up this directory's venv and `.env`.
+> up this directory's venv. Configuration comes from the single repo-root `.env`.
 
 > **For PMs / analysts:** this is where reusable analyst workflows live. Today
 > there are two — a single-ticker research report and a multi-ticker

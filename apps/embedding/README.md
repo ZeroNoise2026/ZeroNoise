@@ -8,7 +8,7 @@ credentials** — which makes it the first thing worth starting when you are
 checking whether your setup works at all.
 
 > Part of the zeroNoise monorepo. Run `./dev.sh` from the repo root — it sets
-> up this directory's venv and `.env`.
+> up this directory's venv. Configuration comes from the single repo-root `.env`.
 
 ## Why it is a separate service
 
@@ -73,7 +73,7 @@ start. `./dev.sh` scaffolds `.env` in a way that preserves them.
 
 ```bash
 docker build -t qa-embedding .
-docker run -p 8002:8080 --env-file .env qa-embedding
+docker run -p 8002:8080 --env-file ../../.env qa-embedding
 ```
 
 Cloud Run ready — honours `$PORT`. Give it enough memory for the model

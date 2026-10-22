@@ -1,6 +1,6 @@
 """
 config.py
-Environment for apps/backend. Importing this module loads .env.
+Environment for apps/backend. Importing this module loads the repo-root .env.
 
 SUPABASE_KEY and ANTHROPIC_API_KEY are read from the environment by
 libs/common; MAX_CONTEXT_CHARS by libs/research. Only settings the backend
@@ -8,9 +8,13 @@ itself reads are listed here.
 """
 
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+# The single repo-root .env: the nearest .env above this file. Real environment
+# variables (Cloud Run) win; in a container there is no file and this is a no-op.
+load_dotenv(next((d / ".env" for d in Path(__file__).resolve().parents if (d / ".env").is_file()), None))
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 # JWT secret for verifying Supabase Auth access tokens (legacy HS256).

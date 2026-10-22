@@ -10,7 +10,7 @@
 #   ./deploy.sh                     preflight + deploy everything (idempotent)
 #   ./deploy.sh preflight           what is ready, what is blocked, and why
 #   ./deploy.sh bootstrap           ONE TIME: enable APIs, registry, service accounts
-#   ./deploy.sh secrets [svc...]    push secret values from local .env to Secret Manager
+#   ./deploy.sh secrets [svc...]    push secret values from the repo-root .env to Secret Manager
 #   ./deploy.sh deploy [svc...]     build + deploy, in dependency order, wiring URLs
 #   ./deploy.sh urls                print the live service URLs
 #   ./deploy.sh status              revisions and traffic
@@ -170,7 +170,8 @@ looks_placeholder() {
     *) return 1 ;;
   esac
 }
-svc_envfile() { echo "$(svc_dir "$1")/.env"; }
+# One .env for the whole repo; plain config and secret values both come from it.
+svc_envfile() { echo "$ROOT/.env"; }
 
 project_id() {
   if [ -n "${DEPLOY_PROJECT:-}" ]; then printf '%s' "$DEPLOY_PROJECT"; return 0; fi
@@ -280,7 +281,7 @@ cmd_preflight() {
       looks_placeholder "$v" && miss="$miss $k"
     done
     if [ ! -f "$file" ]; then
-      bad ".env missing -> ./dev.sh setup $s"; blocked=$((blocked+1))
+      bad ".env missing -> ./dev.sh setup"; blocked=$((blocked+1))
     elif [ -n "$miss" ]; then
       bad "missing values:$(printf ' %s' $miss)"; blocked=$((blocked+1))
     else
@@ -354,11 +355,10 @@ cmd_bootstrap() {
 # ─────────────────────────────────────────────────────────────
 # secrets
 # ─────────────────────────────────────────────────────────────
-# Every secret's authoritative local value lives in the central secrets file
-# that dev.sh manages (./dev.sh secrets). One secret in Secret Manager, many
-# consumers — SUPABASE_KEY is one string, never three different secrets.
-SECRETS_FILE="${QUANT_SECRETS_FILE:-$HOME/.config/quantagent/secrets.env}"
-secret_source_file() { echo "$SECRETS_FILE"; }
+# Every secret's authoritative local value lives in the repo-root .env. One
+# secret in Secret Manager, many consumers — SUPABASE_KEY is one string, never
+# three different secrets.
+secret_source_file() { echo "$ROOT/.env"; }
 
 cmd_secrets() {
   need_cmd gcloud "Install the Google Cloud SDK."
@@ -376,7 +376,7 @@ cmd_secrets() {
     src="$(secret_source_file "$k")"
     val="$(env_val "$src" "$k" 2>/dev/null || true)"
     if looks_placeholder "$val"; then
-      bad "$k: no real value in $src — skipped (./dev.sh secrets init)"
+      bad "$k: no real value in $src — skipped"
       continue
     fi
     if ! gcloud secrets describe "$k" --project "$proj" >/dev/null 2>&1; then
@@ -567,7 +567,7 @@ cmd_cors() {
     --update-env-vars "^@^ALLOWED_ORIGINS=$origins@ALLOWED_ORIGIN_REGEX=https://.*\.vercel\.app" \
     --quiet >/dev/null
   ok "backend CORS -> $origins (+ preview deploys via regex)"
-  info "also mirror this into apps/backend/.env so the next full deploy keeps it"
+  info "also mirror this into .env so the next full deploy keeps it"
 }
 
 cmd_frontend() {
