@@ -1,0 +1,23 @@
+# Also needs libs/common, libs/research, libs/skills and libs/marketdata;
+# dev.sh and the Dockerfile install them from the monorepo checkout (a
+# relative path here would depend on the working directory).
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+pyjwt[crypto]>=2.8
+
+# question flow
+httpx>=0.27.0
+jinja2
+jsonschema
+
+# File parsing
+python-multipart>=0.0.9
+openpyxl>=3.1
+pypdf>=4.2
+python-docx>=1.1
+chardet>=5.2
+
+# tests
+pytest

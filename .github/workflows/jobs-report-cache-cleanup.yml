@@ -1,0 +1,35 @@
+name: Report Cache Cleanup
+
+on:
+  schedule:
+    - cron: '0 9 * * *'    # Daily at 09:00 UTC
+  workflow_dispatch:         # Manual trigger
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/jobs
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: apps/jobs/requirements.txt
+
+      - name: Install dependencies
+        run: pip install ../../libs/common ../../libs/research -r requirements.txt
+
+      - name: Prune summary_cache (>90 days)
+        run: python -m reports.cleanup

@@ -1,55 +1,59 @@
 #!/usr/bin/env bash
 #
-# dev.sh — single entry point for the whole QuantAgent stack.
+# dev.sh — single entry point for the whole stack, in one monorepo.
 #
-# You only ever clone THIS repo. Everything else is pulled by `sync`.
-#
-#   git clone https://github.com/ZeroNoise2026/QuantAgent.git
-#   cd QuantAgent && ./dev.sh
+#   git clone https://github.com/ZeroNoise2026/QuantAgent.git zeroNoise
+#   cd zeroNoise && ./dev.sh
 #
 # Commands
-#   ./dev.sh                 sync + setup + doctor  (start here; idempotent)
-#   ./dev.sh sync            clone/pull the sibling repos
+#   ./dev.sh                 setup + doctor  (start here; idempotent)
+#   ./dev.sh sync            git pull --ff-only
 #   ./dev.sh setup [svc...]  venvs, deps, .env scaffolding
 #   ./dev.sh doctor          what is ready, what is blocked, and why
 #   ./dev.sh test            offline suites (zero credentials)
-#   ./dev.sh eval [args...]  summarizer eval suite (needs MOONSHOT_API_KEY)
 #   ./dev.sh up [svc...]     start services whose credentials are present
 #   ./dev.sh down [svc...]   stop them
 #   ./dev.sh status          which services are up
 #   ./dev.sh logs <svc>      tail a service log
+#   ./dev.sh job <name> [args]  run a batch job: ingest | reports | briefing | cleanup
+#   ./dev.sh env             which keys in .env are set (values masked)
+#   ./dev.sh env pull        fill .env's secrets from GCP Secret Manager
 #
-# services: embedding pipeline question backend frontend
+# services: embedding api frontend
 #
-# Layout it produces — sibling repos, NOT nested inside this one:
+# Layout
 #
-#   <workspace>/
-#   ├── QuantAgent/          <- you cloned this; dev.sh lives here
-#   ├── Skills/              <- pulled by ./dev.sh sync
-#   ├── Summarization/
-#   ├── data-pipeline/
-#   └── embedding-service/
+#   apps/api            FastAPI: auth, user data, chat, RAG   (service: api)
+#   apps/web            React frontend                        (service: frontend)
+#   apps/embedding      embedding API                         (service: embedding)
+#   apps/jobs           batch jobs: ingestion, reports, briefings, cache cleanup
+#   libs/common         Claude client, Supabase client, audit log
+#   libs/research       ticker context, report generation + cache
+#   libs/skills         skill framework: registry, LLM router, built-in skills
+#   libs/marketdata     Finnhub / FMP / EDGAR clients
 #
-# Sibling (not nested) is deliberate: every cross-repo import in the codebase
-# resolves via `parents[N]` assuming this shape. Nesting would silently break
-# skills discovery and the Summarization lookups.
+# Rule: apps never import each other. Code two apps need goes in libs/.
 #
 # Env
-#   GIT_PROTOCOL=ssh   use git@github.com: instead of https:// for sync
+#   ONE file for every service: <repo>/.env (gitignored), scaffolded from
+#   .env.example by `setup`. Python apps load it from their config.py; the
+#   frontend through Vite's envDir.
+#   DEPLOY_PROJECT       GCP project for `env pull` (default: gcloud config)
 #
 # Written for bash 3.2 (what macOS still ships) — no associative arrays.
 
 set -euo pipefail
 
-QUANT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$QUANT_DIR/.." && pwd)"
-STATE="$QUANT_DIR/.devstack"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE="$ROOT/.devstack"
 LOGS="$STATE/logs"
 PIDS="$STATE/pids"
 
-GH_ORG="ZeroNoise2026"
-SIBLING_REPOS="Skills Summarization data-pipeline embedding-service"
-ALL_SERVICES="embedding pipeline question backend frontend"
+ALL_SERVICES="embedding api frontend"
+
+ENV_FILE="$ROOT/.env"
+# Secrets mirrored in GCP Secret Manager (see deploy.sh svc_secret_vars).
+GSM_SECRETS="ANTHROPIC_API_KEY SUPABASE_KEY SUPABASE_JWT_SECRET FINNHUB_API_KEY FMP_API_KEY"
 
 # ─────────────────────────────────────────────────────────────
 # output
@@ -71,31 +75,25 @@ die()  { printf '\n%serror:%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; exit 1; }
 # ─────────────────────────────────────────────────────────────
 # service registry (case statements — bash 3.2 has no assoc arrays)
 # ─────────────────────────────────────────────────────────────
-# Absolute paths, so this keeps working even if the clone directory is not
-# literally named "QuantAgent".
 svc_path() {
   case "$1" in
-    embedding) echo "$ROOT/embedding-service" ;;
-    pipeline)  echo "$ROOT/data-pipeline" ;;
-    question)  echo "$ROOT/Summarization" ;;
-    backend)   echo "$QUANT_DIR/backend" ;;
-    frontend)  echo "$QUANT_DIR/frontend" ;;
+    embedding) echo "$ROOT/apps/embedding" ;;
+    api)       echo "$ROOT/apps/api" ;;
+    jobs)      echo "$ROOT/apps/jobs" ;;   # python app, not a long-running service
+    frontend)  echo "$ROOT/apps/web" ;;
     *) return 1 ;;
   esac
 }
 svc_port() {
   case "$1" in
-    embedding) echo 8002 ;; pipeline) echo 8001 ;; question) echo 8003 ;;
-    backend) echo 8000 ;; frontend) echo 3000 ;; *) return 1 ;;
+    embedding) echo 8002 ;; api) echo 8000 ;; frontend) echo 3000 ;; *) return 1 ;;
   esac
 }
 svc_label() {
   case "$1" in
     embedding) echo "embedding-service (vectors)" ;;
-    pipeline)  echo "data-pipeline API (live lookups)" ;;
-    question)  echo "question-service (RAG Q&A)" ;;
-    backend)   echo "QuantAgent backend (BFF)" ;;
-    frontend)  echo "QuantAgent frontend (React)" ;;
+    api)       echo "API: auth, user data, chat, RAG" ;;
+    frontend)  echo "frontend (React)" ;;
   esac
 }
 # Env vars that must hold a real value before the service can usefully start.
@@ -103,32 +101,25 @@ svc_label() {
 svc_required() {
   case "$1" in
     embedding) echo "" ;;
-    pipeline)  echo "SUPABASE_URL SUPABASE_KEY FINNHUB_API_KEY FMP_API_KEY EDGAR_USER_AGENT" ;;
-    question)  echo "SUPABASE_URL SUPABASE_KEY MOONSHOT_API_KEY" ;;
-    backend)   echo "SUPABASE_URL SUPABASE_KEY SUPABASE_JWT_SECRET MOONSHOT_API_KEY" ;;
+    api)       echo "SUPABASE_URL SUPABASE_KEY SUPABASE_JWT_SECRET ANTHROPIC_API_KEY" ;;
     frontend)  echo "VITE_SUPABASE_URL VITE_SUPABASE_PUBLISHABLE_KEY" ;;
-  esac
-}
-svc_envfile() {
-  case "$1" in
-    frontend) echo "$(svc_path "$1")/.env.local" ;;
-    *)        echo "$(svc_path "$1")/.env" ;;
   esac
 }
 svc_start_cmd() {
   case "$1" in
     embedding) echo "venv/bin/uvicorn app.main:app --port 8002" ;;
-    pipeline)  echo "venv/bin/uvicorn pipeline.api:app --port 8001" ;;
-    question)  echo "venv/bin/uvicorn question.main:app --port 8003" ;;
-    backend)   echo "venv/bin/uvicorn main:app --port 8000" ;;
+    api)       echo "venv/bin/uvicorn main:app --port 8000" ;;
     frontend)  echo "npm run dev" ;;
   esac
 }
-is_node_svc() { [ "$1" = "frontend" ]; }
-repo_url() {
-  if [ "${GIT_PROTOCOL:-https}" = "ssh" ]; then echo "git@github.com:$GH_ORG/$1.git"
-  else echo "https://github.com/$GH_ORG/$1.git"; fi
+# libs/ packages each Python service imports (installed editable by setup).
+svc_libs() {
+  case "$1" in
+    api|jobs) echo "common research skills marketdata" ;;
+    *)        echo "" ;;
+  esac
 }
+is_node_svc() { [ "$1" = "frontend" ]; }
 
 # ─────────────────────────────────────────────────────────────
 # helpers
@@ -150,16 +141,15 @@ env_val() {
 # placeholders as configured. So we tell the two apart.
 looks_placeholder() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
-    ""|your*|"<"*">"|*xxx*|changeme*|todo*|replace*|sk-x*) return 0 ;;
+    ""|your*|*"<"*">"*|*xxx*|changeme*|todo*|replace*|sk-x*) return 0 ;;
     *) return 1 ;;
   esac
 }
 
 missing_vars() {
-  local svc="$1" file out="" k v
-  file="$(svc_envfile "$svc")"
+  local svc="$1" out="" k v
   for k in $(svc_required "$svc"); do
-    v="$(env_val "$file" "$k" 2>/dev/null || true)"
+    v="$(env_val "$ENV_FILE" "$k" 2>/dev/null || true)"
     looks_placeholder "$v" && out="$out $k"
   done
   printf '%s' "${out# }"
@@ -168,84 +158,74 @@ missing_vars() {
 port_busy() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
 pidfile()   { echo "$PIDS/$1.pid"; }
 running()   { local f; f="$(pidfile "$1")"; [ -f "$f" ] && kill -0 "$(cat "$f")" 2>/dev/null; }
+
+# Replace KEY=... in an existing .env. awk with ENVIRON, not sed, so values
+# containing / & | or quotes are written verbatim.
+set_env_val() {
+  local file="$1" key="$2" val="$3" tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/devenv.XXXXXX")"
+  KEY="$key" VAL="$val" awk '
+    BEGIN { k = ENVIRON["KEY"]; v = ENVIRON["VAL"] }
+    $0 ~ "^[[:space:]]*" k "[[:space:]]*=" { print k "=" v; next }
+    { print }' "$file" > "$tmp"
+  cat "$tmp" > "$file"; rm -f "$tmp"
+}
+has_env_key() { [ -f "$1" ] && grep -q "^[[:space:]]*$2[[:space:]]*=" "$1"; }
+mask() { local v="$1"; [ "${#v}" -le 8 ] && echo "****" || echo "${v:0:4}…${v: -4}"; }
 validate_svc() { svc_path "$1" >/dev/null 2>&1 || die "unknown service: $1 (have: $ALL_SERVICES)"; }
 resolve_svcs() { if [ "$#" -eq 0 ]; then echo "$ALL_SERVICES"; else for s in "$@"; do validate_svc "$s"; done; echo "$@"; fi; }
 need_cmd() { command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH. $2"; }
 
 # ─────────────────────────────────────────────────────────────
-# sync — pull the sibling repos
+# sync
 # ─────────────────────────────────────────────────────────────
 cmd_sync() {
   need_cmd git "Install git first."
-  # Refuse to scatter repos across a home directory or a filesystem root.
-  case "$ROOT" in
-    "$HOME"|"/"|"") die "This repo is cloned directly into '$ROOT'. Sibling repos would be
-       created there. Re-clone into a dedicated workspace folder instead:
-         mkdir ~/quantagent && cd ~/quantagent
-         git clone $(repo_url QuantAgent)" ;;
-  esac
-
-  head1 "SYNC  (workspace: $ROOT)"
-  info "protocol: ${GIT_PROTOCOL:-https}   (GIT_PROTOCOL=ssh to switch)"
-  local r dir
-  for r in $SIBLING_REPOS; do
-    dir="$ROOT/$r"
-    if [ -d "$dir/.git" ]; then
-      # --ff-only: never invent a merge commit in someone's working repo.
-      if git -C "$dir" pull --ff-only --quiet 2>/dev/null; then
-        ok "$r up to date ($(git -C "$dir" rev-parse --short HEAD))"
-      else
-        warn "$r: fast-forward pull failed — local commits or a dirty tree? left untouched"
-      fi
-    elif [ -d "$dir" ]; then
-      warn "$r: directory exists but is not a git repo — left untouched"
-    else
-      info "$r: cloning"
-      if git clone --quiet "$(repo_url "$r")" "$dir"; then ok "$r cloned"
-      else bad "$r: clone failed ($(repo_url "$r"))"; fi
-    fi
-  done
+  head1 "SYNC"
+  # --ff-only: never invent a merge commit in a working checkout.
+  if git -C "$ROOT" pull --ff-only --quiet; then ok "up to date ($(git -C "$ROOT" rev-parse --short HEAD))"
+  else warn "fast-forward pull failed — local commits or a dirty tree? left untouched"; fi
 }
 
 # ─────────────────────────────────────────────────────────────
 # setup
 # ─────────────────────────────────────────────────────────────
 scaffold_env() {
-  local svc="$1" file example line k v blanked=0
-  file="$(svc_envfile "$svc")"; example="$(svc_path "$svc")/.env.example"
-  if [ -f "$file" ]; then info "$(basename "$file") already exists — left untouched"; return 0; fi
-  [ -f "$example" ] || { warn "no .env.example for $svc; skipping"; return 0; }
-  : > "$file"
+  local example="$ROOT/.env.example" line k v blanked=0
+  if [ -f "$ENV_FILE" ]; then info ".env already exists — left untouched"; return 0; fi
+  ( umask 077; : > "$ENV_FILE" )
   while IFS= read -r line || [ -n "$line" ]; do
     case "$line" in
       [A-Z]*=*)
         k="${line%%=*}"; v="${line#*=}"
-        if looks_placeholder "$v"; then printf '%s=\n' "$k" >> "$file"; blanked=$((blanked + 1))
-        else printf '%s\n' "$line" >> "$file"; fi ;;
-      *) printf '%s\n' "$line" >> "$file" ;;
+        if looks_placeholder "$v"; then printf '%s=\n' "$k" >> "$ENV_FILE"; blanked=$((blanked + 1))
+        else printf '%s\n' "$line" >> "$ENV_FILE"; fi ;;
+      *) printf '%s\n' "$line" >> "$ENV_FILE" ;;
     esac
   done < "$example"
-  ok "scaffolded $(basename "$file") — kept real defaults, emptied $blanked placeholder(s)"
+  ok "scaffolded .env — kept real defaults, emptied $blanked placeholder(s); fill them in"
 }
 
 setup_python_svc() {
   local svc="$1" dir venv
   dir="$(svc_path "$svc")"; venv="$dir/venv"
-  [ -d "$dir" ] || { warn "$svc: $dir missing — run ./dev.sh sync first"; return 0; }
+  [ -d "$dir" ] || { warn "$svc: $dir missing"; return 0; }
   if [ ! -x "$venv/bin/python" ]; then info "$svc: creating venv"; python3 -m venv "$venv"; fi
   "$venv/bin/python" -m pip install --quiet --upgrade pip >/dev/null
   if [ -f "$dir/requirements.txt" ]; then
     info "$svc: installing requirements (can take a few minutes)"
     "$venv/bin/python" -m pip install --quiet -r "$dir/requirements.txt"
   fi
-  # Prefer the LOCAL Skills clone over the git pin in requirements.txt, so
-  # edits to Skills take effect without a push→reinstall round trip.
-  if [ "$svc" = "backend" ] && [ -f "$ROOT/Skills/pyproject.toml" ]; then
-    "$venv/bin/python" -m pip install --quiet -e "$ROOT/Skills"
-    info "$svc: skills installed editable from ../Skills (overrides the git pin)"
+  # libs/ packages install editable, so edits take effect without a reinstall.
+  local libs; libs="$(svc_libs "$svc")"
+  if [ -n "$libs" ]; then
+    local lib args=""
+    for lib in $libs; do args="$args -e $ROOT/libs/$lib"; done
+    # shellcheck disable=SC2086
+    "$venv/bin/python" -m pip install --quiet $args
+    info "$svc: libs installed editable ($libs)"
   fi
   ok "$svc: python deps ready"
-  scaffold_env "$svc"
 }
 
 setup_frontend() {
@@ -254,7 +234,6 @@ setup_frontend() {
   need_cmd npm "Install Node 18+ from nodejs.org or via brew."
   if [ ! -d "$dir/node_modules" ]; then info "frontend: npm install"; ( cd "$dir" && npm install --silent ); fi
   ok "frontend: node deps ready"
-  scaffold_env frontend
 }
 
 cmd_setup() {
@@ -262,22 +241,13 @@ cmd_setup() {
   mkdir -p "$LOGS" "$PIDS"
   local svcs s; svcs="$(resolve_svcs "$@")"
   head1 "SETUP"
+  scaffold_env
   for s in $svcs; do
+    [ "$s" = jobs ] && continue   # handled below
     if is_node_svc "$s"; then setup_frontend; else setup_python_svc "$s"; fi
   done
-  # Skills is a library, not a service, but its offline suite is the fastest
-  # proof the codebase is intact — give it a venv too. Non-fatal on failure.
-  if [ -f "$ROOT/Skills/pyproject.toml" ] && [ ! -x "$ROOT/Skills/venv/bin/python" ]; then
-    if python3 -m venv "$ROOT/Skills/venv" \
-       && "$ROOT/Skills/venv/bin/python" -m pip install --quiet --upgrade pip >/dev/null \
-       && "$ROOT/Skills/venv/bin/python" -m pip install --quiet -e "$ROOT/Skills"; then
-      ok "Skills: venv ready (editable install)"
-    else
-      warn "Skills: editable install failed — ./dev.sh test will skip the smoke suite"
-    fi
-  elif [ -d "$ROOT/Skills" ] && [ ! -f "$ROOT/Skills/pyproject.toml" ]; then
-    warn "Skills/pyproject.toml missing — run ./dev.sh sync to update it"
-  fi
+  # apps/jobs is not a service, but it needs a venv for `./dev.sh job`.
+  case " $* " in "  "|*" jobs "*) setup_python_svc jobs ;; esac
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -286,11 +256,9 @@ cmd_setup() {
 cmd_doctor() {
   head1 "WORKSPACE"
   info "$ROOT"
-  local r
-  for r in $SIBLING_REPOS; do
-    if [ -d "$ROOT/$r/.git" ]; then ok "$(printf '%-18s %s' "$r" "$(git -C "$ROOT/$r" rev-parse --short HEAD 2>/dev/null)")"
-    else bad "$(printf '%-18s missing -> ./dev.sh sync' "$r")"; fi
-  done
+  ok "$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null) @ $(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null)"
+
+  env_status
 
   head1 "TOOLCHAIN"
   command -v python3 >/dev/null 2>&1 && ok "python3 $(python3 -V 2>&1 | awk '{print $2}')" || bad "python3 missing"
@@ -307,8 +275,6 @@ cmd_doctor() {
     else
       [ -x "$venv/bin/python" ] && ok "venv present" || bad "no venv -> ./dev.sh setup $s"
     fi
-    [ -f "$(svc_envfile "$s")" ] && ok "$(basename "$(svc_envfile "$s")") exists" \
-      || bad "$(basename "$(svc_envfile "$s")") missing -> ./dev.sh setup $s"
     if [ -z "$(svc_required "$s")" ]; then ok "needs no external credentials"
     elif [ -z "$miss" ]; then ok "all required env vars set"
     else bad "missing values:$(printf ' %s' $miss)"; blocked=$((blocked+1)); fi
@@ -317,44 +283,98 @@ cmd_doctor() {
 
   head1 "WHAT YOU CAN DO RIGHT NOW"
   info "./dev.sh test    offline suites, zero credentials"
-  if [ -n "$(env_val "$QUANT_DIR/backend/.env" MOONSHOT_API_KEY 2>/dev/null || true)" ]; then
-    info "./dev.sh eval    eval suite (MOONSHOT_API_KEY found)"
-  else
-    warn "./dev.sh eval  blocked: set MOONSHOT_API_KEY in backend/.env"
-  fi
   if [ "$blocked" -gt 0 ]; then
     printf '\n  %s%s service(s) blocked.%s Supabase keys: Dashboard -> Project Settings -> API.\n' "$C_YEL" "$blocked" "$C_RESET"
   fi
 }
 
 # ─────────────────────────────────────────────────────────────
-# test / eval
+# test
 # ─────────────────────────────────────────────────────────────
 cmd_test() {
   head1 "OFFLINE SUITES (no credentials)"
-  local rc=0
-  if [ -x "$ROOT/Skills/venv/bin/python" ]; then
-    say "  skills smoke suite:"
-    ( cd "$ROOT/Skills" && ./venv/bin/python -m skills.tests.test_smoke ) || rc=1
+  local rc=0 api="$ROOT/apps/api/venv/bin/python" jobs="$ROOT/apps/jobs/venv/bin/python"
+  if [ -x "$api" ]; then
+    # The api venv has every lib installed editable, so it runs the libs suites too.
+    say "  libs:"
+    "$api" -m pytest -q "$ROOT/libs/research/tests" || rc=1
+    ( cd "$ROOT/libs/skills" && "$api" -m skills.tests.test_smoke ) || rc=1
+    say ""; say "  apps/api:"
+    ( cd "$ROOT/apps/api" && "$api" -m pytest -q tests ) || rc=1
   else
-    warn "Skills venv missing -> ./dev.sh setup"; rc=1
+    warn "api venv missing -> ./dev.sh setup api"; rc=1
   fi
-  if [ -x "$QUANT_DIR/backend/venv/bin/python" ]; then
-    say ""; say "  eval structural checks (no LLM):"
-    ( cd "$QUANT_DIR/backend" && ./venv/bin/python -m evals.run --n 1 --no-judge ) || rc=1
+  if [ -x "$jobs" ]; then
+    say ""; say "  apps/jobs:"
+    ( cd "$ROOT/apps/jobs" && "$jobs" -m pytest -q tests ) || rc=1
   else
-    warn "backend venv missing -> ./dev.sh setup backend"
+    warn "jobs venv missing -> ./dev.sh setup jobs"; rc=1
   fi
+  say ""; say "  module boundaries:"
+  python3 "$ROOT/scripts/check_boundaries.py" || rc=1
   return $rc
 }
 
-cmd_eval() {
-  local dir="$QUANT_DIR/backend"
-  [ -x "$dir/venv/bin/python" ] || die "backend venv missing. Run: ./dev.sh setup backend"
-  [ -n "$(env_val "$dir/.env" MOONSHOT_API_KEY 2>/dev/null || true)" ] || die "MOONSHOT_API_KEY is empty in backend/.env"
-  head1 "EVAL SUITE"
-  if [ "$#" -eq 0 ]; then ( cd "$dir" && ./venv/bin/python -m evals.run --suite summarizer --n 3 )
-  else ( cd "$dir" && ./venv/bin/python -m evals.run "$@" ); fi
+# ─────────────────────────────────────────────────────────────
+# env
+# ─────────────────────────────────────────────────────────────
+# Every key some service requires, de-duplicated, in a stable order.
+required_keys() {
+  local s; for s in $ALL_SERVICES; do svc_required "$s"; echo; done | tr ' ' '\n' | awk 'NF && !seen[$0]++'
+}
+
+env_status() {
+  head1 "ENV  $ENV_FILE"
+  [ -f "$ENV_FILE" ] || { warn "missing — ./dev.sh setup scaffolds it from .env.example"; return 0; }
+  local k v
+  for k in $(required_keys); do
+    v="$(env_val "$ENV_FILE" "$k" 2>/dev/null || true)"
+    if looks_placeholder "$v"; then bad "$k: empty"; else ok "$(printf '%-30s %s' "$k" "$(mask "$v")")"; fi
+  done
+}
+
+# Fill .env's secrets from GCP Secret Manager (latest versions).
+env_pull() {
+  need_cmd gcloud "Install the Google Cloud SDK, then: gcloud auth login"
+  local proj k v
+  proj="${DEPLOY_PROJECT:-$(gcloud config get-value project 2>/dev/null || true)}"
+  case "$proj" in ""|"(unset)") die "no GCP project: set DEPLOY_PROJECT or run gcloud config set project <id>" ;; esac
+  [ -f "$ENV_FILE" ] || scaffold_env
+  for k in $GSM_SECRETS; do
+    if v="$(gcloud secrets versions access latest --secret="$k" --project "$proj" 2>/dev/null)"; then
+      if has_env_key "$ENV_FILE" "$k"; then set_env_val "$ENV_FILE" "$k" "$v"
+      else printf '%s=%s\n' "$k" "$v" >> "$ENV_FILE"; fi
+      ok "$k: pulled"
+    else
+      warn "$k: not in Secret Manager ($proj) or no access — left as is"
+    fi
+  done
+}
+
+cmd_env() {
+  case "${1:-status}" in
+    status) env_status ;;
+    pull)   head1 "PULL"; env_pull ;;
+    *)      die "unknown: env $1 (status|pull)" ;;
+  esac
+}
+
+# ─────────────────────────────────────────────────────────────
+# jobs
+# ─────────────────────────────────────────────────────────────
+cmd_job() {
+  local name="${1:-}" py="$ROOT/apps/jobs/venv/bin/python" mod
+  [ "$#" -gt 0 ] && shift
+  case "$name" in
+    ingest)   mod="pipeline.run"; running embedding || warn "embedding is not running — ingestion needs it (./dev.sh up embedding)" ;;
+    reports)  mod="reports.run" ;;
+    briefing) mod="briefing" ;;
+    cleanup)  mod="reports.cleanup" ;;
+    *)        die "usage: ./dev.sh job ingest|reports|briefing|cleanup [args...]" ;;
+  esac
+  [ -x "$py" ] || die "jobs venv missing. Run: ./dev.sh setup jobs"
+  head1 "JOB  $name"
+  ( cd "$ROOT/apps/jobs" && "$py" -m "$mod" "$@" )
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -414,7 +434,7 @@ cmd_up() {
   local svcs ordered="" started="" s; svcs="$(resolve_svcs "$@")"
   head1 "STARTING"
   # Dependency order: vectors -> RAG -> BFF -> UI.
-  for s in embedding pipeline question backend frontend; do
+  for s in embedding api frontend; do
     case " $svcs " in *" $s "*) ordered="$ordered $s" ;; esac
   done
   for s in $ordered; do start_svc "$s" && started="$started $s" || true; done
@@ -459,21 +479,22 @@ cmd_logs() {
   tail -f "$LOGS/$1.log"
 }
 
-usage() { sed -n '2,40p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
+usage() { sed -n '2,43p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
 
 main() {
   local cmd="${1:-default}"; [ "$#" -gt 0 ] && shift || true
   case "$cmd" in
-    default)        cmd_sync; cmd_setup; cmd_doctor ;;
+    default)        cmd_setup; cmd_doctor ;;
     sync|pull)      cmd_sync ;;
     setup)          cmd_setup "$@" ;;
     doctor|check)   cmd_doctor ;;
     test)           cmd_test ;;
-    eval)           cmd_eval "$@" ;;
     up|start)       cmd_up "$@" ;;
     down|stop)      cmd_down "$@" ;;
     status|ps)      cmd_status ;;
     logs)           cmd_logs "$@" ;;
+    env)            cmd_env "$@" ;;
+    job)            cmd_job "$@" ;;
     -h|--help|help) usage ;;
     *)              die "unknown command '$cmd' (try ./dev.sh --help)" ;;
   esac

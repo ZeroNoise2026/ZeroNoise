@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>zeroNoise Architecture</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0f1117; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 40px; }
+  h1 { text-align: center; font-size: 28px; color: #fff; margin-bottom: 8px; }
+  .subtitle { text-align: center; font-size: 14px; color: #888; margin-bottom: 40px; }
+
+  .canvas { position: relative; max-width: 1100px; margin: 0 auto; }
+
+  /* Layers */
+  .layer { margin-bottom: 32px; }
+  .layer-label {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 2px;
+    color: #666; margin-bottom: 12px; padding-left: 4px;
+  }
+  .layer-row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+
+  /* Cards */
+  .card {
+    background: #1a1d27; border: 1px solid #2a2d3a; border-radius: 12px;
+    padding: 20px 24px; flex: 1; min-width: 220px; max-width: 320px;
+    transition: border-color 0.2s;
+  }
+  .card:hover { border-color: #4a4d5a; }
+  .card-icon { font-size: 24px; margin-bottom: 8px; }
+  .card-title { font-size: 16px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+  .card-repo { font-size: 11px; color: #666; font-family: monospace; margin-bottom: 10px; }
+  .card-desc { font-size: 13px; color: #aaa; line-height: 1.5; }
+
+  .card.data-source { border-left: 3px solid #f59e0b; }
+  .card.pipeline { border-left: 3px solid #3b82f6; }
+  .card.service { border-left: 3px solid #8b5cf6; }
+  .card.ai { border-left: 3px solid #ec4899; }
+  .card.frontend { border-left: 3px solid #10b981; }
+  .card.storage { border-left: 3px solid #6366f1; }
+
+  /* New badge */
+  .badge-new {
+    display: inline-block; background: #ef4444; color: #fff; font-size: 10px;
+    font-weight: 700; padding: 2px 6px; border-radius: 4px; margin-left: 6px;
+    vertical-align: middle;
+  }
+
+  /* Arrows */
+  .arrow-section { text-align: center; margin: 8px 0; }
+  .arrow {
+    display: inline-block; color: #444; font-size: 22px; line-height: 1;
+  }
+  .arrow-label {
+    display: inline-block; font-size: 11px; color: #666; background: #1a1d27;
+    padding: 2px 10px; border-radius: 10px; border: 1px solid #2a2d3a;
+    margin: 0 8px;
+  }
+
+  /* Flow diagram */
+  .flow-section {
+    margin-top: 48px; background: #1a1d27; border: 1px solid #2a2d3a;
+    border-radius: 16px; padding: 32px;
+  }
+  .flow-title { font-size: 18px; font-weight: 700; color: #fff; margin-bottom: 24px; text-align: center; }
+
+  .flow-row { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+  .flow-box {
+    padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    white-space: nowrap;
+  }
+  .flow-arrow { color: #555; font-size: 18px; }
+
+  .fb-source { background: #292017; color: #f59e0b; border: 1px solid #4a3520; }
+  .fb-process { background: #172035; color: #3b82f6; border: 1px solid #1e3a5f; }
+  .fb-classify { background: #2d1a1a; color: #ef4444; border: 1px solid #5f1e1e; }
+  .fb-embed { background: #271730; color: #8b5cf6; border: 1px solid #3d1f5f; }
+  .fb-store { background: #1a2035; color: #6366f1; border: 1px solid #2a3560; }
+  .fb-llm { background: #2d1730; color: #ec4899; border: 1px solid #5f1f3d; }
+  .fb-output { background: #17292a; color: #10b981; border: 1px solid #1f4a3d; }
+
+  .legend { display: flex; gap: 20px; justify-content: center; margin-top: 24px; flex-wrap: wrap; }
+  .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  .new-highlight { position: relative; }
+  .new-highlight::after {
+    content: "NEW"; position: absolute; top: -6px; right: -8px;
+    background: #ef4444; color: #fff; font-size: 8px; font-weight: 800;
+    padding: 1px 4px; border-radius: 3px;
+  }
+
+  /* Data flow lines */
+  .data-flow {
+    margin-top: 48px;
+  }
+  .flow-pipe {
+    display: flex; align-items: stretch; justify-content: center; gap: 0; margin: 0 auto;
+    max-width: 900px;
+  }
+  .flow-pipe-step {
+    flex: 1; text-align: center; padding: 16px 8px; position: relative;
+    border-top: 2px solid #2a2d3a; border-bottom: 2px solid #2a2d3a;
+  }
+  .flow-pipe-step:first-child { border-left: 2px solid #2a2d3a; border-radius: 8px 0 0 8px; }
+  .flow-pipe-step:last-child { border-right: 2px solid #2a2d3a; border-radius: 0 8px 8px 0; }
+  .flow-pipe-step:not(:last-child)::after {
+    content: "→"; position: absolute; right: -6px; top: 50%; transform: translateY(-50%);
+    color: #555; font-size: 16px; z-index: 1; background: #0f1117; padding: 0 2px;
+  }
+  .pipe-num { font-size: 20px; font-weight: 800; color: #333; }
+  .pipe-label { font-size: 12px; font-weight: 600; margin-top: 4px; }
+  .pipe-detail { font-size: 11px; color: #666; margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>zeroNoise Architecture</h1>
+<p class="subtitle">AI-powered investment analysis platform &mdash; current state after regulatory feature</p>
+
+<!-- External Data Sources -->
+<div class="layer">
+  <div class="layer-label">External Data Sources</div>
+  <div class="layer-row">
+    <div class="card data-source">
+      <div class="card-icon">📰</div>
+      <div class="card-title">Finnhub</div>
+      <div class="card-desc">Company news, earnings surprises, quotes, financial metrics</div>
+    </div>
+    <div class="card data-source">
+      <div class="card-icon">📋</div>
+      <div class="card-title">SEC EDGAR</div>
+      <div class="card-desc">10-K, 10-Q filings, XBRL facts</div>
+    </div>
+    <div class="card data-source">
+      <div class="card-icon">📊</div>
+      <div class="card-title">FMP</div>
+      <div class="card-desc">Quotes, financial statements, key metrics</div>
+    </div>
+  </div>
+</div>
+
+<div class="arrow-section">
+  <span class="arrow">↓</span>
+  <span class="arrow-label">API calls</span>
+  <span class="arrow">↓</span>
+</div>
+
+<!-- Processing Layer -->
+<div class="layer">
+  <div class="layer-label">Data Processing</div>
+  <div class="layer-row">
+    <div class="card pipeline" style="max-width: 520px;">
+      <div class="card-icon">🔄</div>
+      <div class="card-title">data-pipeline</div>
+      <div class="card-repo">apps/jobs/pipeline/</div>
+      <div class="card-desc">
+        Prefect orchestrated pipeline: fetch → clean → chunk → <strong>classify</strong> <span class="badge-new">NEW</span> → embed → store.
+        <br><br>
+        News articles are now classified as <code style="color:#ef4444">regulatory</code> or <code style="color:#3b82f6">news</code> based on keyword matching (SEC, FDA, lawsuit, fine, investigation, etc.)
+      </div>
+    </div>
+    <div class="card service">
+      <div class="card-icon">🔢</div>
+      <div class="card-title">embedding-service</div>
+      <div class="card-repo">apps/embedding/ &mdash; port 8002</div>
+      <div class="card-desc">
+        Shared vector encoding service using all-MiniLM-L6-v2 (384-dim). Called by the ingestion job and the API&rsquo;s question flow.
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="arrow-section">
+  <span class="arrow">↓</span>
+  <span class="arrow-label">upsert docs + embeddings</span>
+  <span class="arrow">↓</span>
+</div>
+
+<!-- Storage -->
+<div class="layer">
+  <div class="layer-label">Storage</div>
+  <div class="layer-row">
+    <div class="card storage" style="max-width: 700px;">
+      <div class="card-icon">🗄️</div>
+      <div class="card-title">Supabase (PostgreSQL + pgvector)</div>
+      <div class="card-desc" style="display: flex; gap: 24px; flex-wrap: wrap;">
+        <div>
+          <strong style="color:#fff;">documents</strong><br>
+          <code style="font-size:11px; color:#888;">doc_type: news | <span style="color:#ef4444">regulatory</span> | 10-K | 10-Q | earnings</code>
+          <span class="badge-new" style="font-size:8px;">NEW TYPE</span>
+        </div>
+        <div><strong style="color:#fff;">earnings</strong><br><span style="font-size:11px;">EPS, revenue, guidance</span></div>
+        <div><strong style="color:#fff;">price_snapshot</strong><br><span style="font-size:11px;">close, P/E, market cap</span></div>
+        <div><strong style="color:#fff;">tracked_tickers</strong><br><span style="font-size:11px;">active tickers list</span></div>
+        <div><strong style="color:#fff;">user_watchlist</strong><br><span style="font-size:11px;">per-user watchlist</span></div>
+        <div><strong style="color:#fff;">daily_briefings</strong><br><span style="font-size:11px;">generated briefings</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="arrow-section">
+  <span class="arrow">↓</span>
+  <span class="arrow-label">query data</span>
+  <span class="arrow">↓</span>
+</div>
+
+<!-- AI / Generation Layer -->
+<div class="layer">
+  <div class="layer-label">AI Generation</div>
+  <div class="layer-row">
+    <div class="card ai">
+      <div class="card-icon">📝</div>
+      <div class="card-title">Summarization</div>
+      <div class="card-repo">apps/jobs/reports/ + libs/research/</div>
+      <div class="card-desc">
+        Fetches per-ticker data → builds prompt → calls Claude → outputs Markdown report.
+        <br><br>
+        Now includes <strong style="color:#ef4444">Regulatory & Compliance Events</strong> section <span class="badge-new">NEW</span>
+      </div>
+    </div>
+    <div class="card ai">
+      <div class="card-icon">🤖</div>
+      <div class="card-title">Anthropic Claude API</div>
+      <div class="card-desc">LLM backend (Haiku 5.5 for Q&amp;A, routing and briefings; Sonnet 5.5 for research reports). 1M context.</div>
+    </div>
+  </div>
+</div>
+
+<div class="arrow-section">
+  <span class="arrow">↓</span>
+  <span class="arrow-label">API responses</span>
+  <span class="arrow">↓</span>
+</div>
+
+<!-- Frontend -->
+<div class="layer">
+  <div class="layer-label">User Interface</div>
+  <div class="layer-row">
+    <div class="card frontend">
+      <div class="card-icon">💬</div>
+      <div class="card-title">Web app + backend</div>
+      <div class="card-repo">apps/web/ + apps/api/ &mdash; React + FastAPI</div>
+      <div class="card-desc">
+        Three core features:
+        <br>• <strong>Watchlist</strong> — manage tracked tickers
+        <br>• <strong>Daily Briefing</strong> — auto-generated every morning
+        <br>• <strong>RAG Chat</strong> — ask questions, get AI answers backed by real data
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Data Flow Detail -->
+<div class="flow-section">
+  <div class="flow-title">Summarization Data Flow (with regulatory feature)</div>
+
+  <div class="flow-row">
+    <div class="flow-box fb-source">Supabase</div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box fb-process">fetcher.py<br><small>query by ticker</small></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box fb-store">TickerContext<br>
+      <small>news + <span style="color:#ef4444">regulatory</span> + filings + earnings + prices</small>
+    </div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box fb-llm">prompts.py<br><small>build structured prompt</small></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box fb-llm">Claude API<br><small>Haiku 5.5 / Sonnet 5.5</small></div>
+    <span class="flow-arrow">→</span>
+    <div class="flow-box fb-output">Markdown Report<br><small>with compliance section</small></div>
+  </div>
+
+  <div style="margin-top: 32px;">
+    <div class="flow-title" style="font-size: 15px;">Pipeline Classification Flow <span class="badge-new">NEW</span></div>
+    <div class="flow-row">
+      <div class="flow-box fb-source">Finnhub News</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-box fb-process">clean + chunk</div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-box fb-classify">_is_regulatory()<br><small>keyword regex match</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-box fb-embed">embedding-service<br><small>vectorize</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-box fb-store">Supabase<br><small>doc_type = "regulatory" | "news"</small></div>
+    </div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div class="legend" style="margin-top: 32px;">
+  <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> External Data</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div> Data Pipeline</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div> Embedding Service</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div> Storage</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ec4899"></div> AI Generation</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div> Frontend</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div> New (Regulatory)</div>
+</div>
+
+</body>
+</html>

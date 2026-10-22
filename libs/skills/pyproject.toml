@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zeronoise-skills"
+version = "0.1.0"
+description = "Shared skill framework: registry, LLM router, built-in skills"
+readme = "README.md"
+requires-python = ">=3.10"
+# Also needs libs/common and libs/research (installed alongside it; not listed
+# because they are local paths, not published packages).
+dependencies = []
+
+[project.optional-dependencies]
+# Only needed by skills/tests/test_live_router.py, which reads the central secrets file
+dev = [
+    "python-dotenv>=1.0",
+]
+
+[tool.setuptools]
+# The importable package is the tracked skills/ directory, so `import skills`
+# resolves the same way on case-sensitive filesystems (Linux, Docker, CI).
+packages = [
+    "skills",
+    "skills.compare_tickers",
+    "skills.generate_report",
+]
+
+[tool.setuptools.package-data]
+# SKILL.md is read at runtime by Skill.skill_md(), so it must ship with the
+# package rather than being treated as repo-only documentation.
+"skills.compare_tickers" = ["SKILL.md"]
+"skills.generate_report" = ["SKILL.md"]

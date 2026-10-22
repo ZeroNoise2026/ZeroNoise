@@ -1,112 +1,115 @@
 # ZeroNoise
 
 Financial research assistant: daily briefings, watchlist management, RAG-based
-Q&A over SEC filings and news, and on-demand ticker research reports.
+Q&A over SEC filings and news, and on-demand ticker research reports — powered
+by Claude.
 
-**This is the entry point for the whole system.** Clone this repo and nothing
-else — `./dev.sh` pulls the other four repos, installs everything, and tells
-you exactly what is still missing.
+One monorepo, one `.env`, two long-running services (API + embedding), one
+set of batch jobs.
+
+## Quick start
 
 ```bash
-mkdir ~/quantagent && cd ~/quantagent
-git clone https://github.com/ZeroNoise2026/QuantAgent.git
-cd QuantAgent && ./dev.sh
+git clone https://github.com/ZeroNoise2026/QuantAgent.git zeroNoise
+cd zeroNoise
+./dev.sh              # venvs + deps, scaffolds .env, readiness report
+$EDITOR .env          # fill in the empty credentials (see Configuration)
+./dev.sh up           # start embedding, api and the web app
 ```
 
-That one command syncs the sibling repos, creates a venv per service, scaffolds
-every `.env`, and prints a readiness report. Then fill in your credentials and
-`./dev.sh up`.
+Then open http://localhost:3000. `./dev.sh doctor` tells you exactly what is
+still missing at any point.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  U["Browser<br/>:3000"] -->|"ask"| B["backend<br/>:8000"]
-  B -->|"skill match"| S["Skills"]
-  B -->|"otherwise"| Q["question-service<br/>:8003"]
-  S --> L["Moonshot KIMI"]
+  U["Browser<br/>apps/web :3000"] -->|"chat, watchlist, briefings"| A["apps/api<br/>:8000"]
+  A -->|"skill match"| S["libs/skills"]
+  A -->|"RAG"| Q["question flow<br/>(inside apps/api)"]
+  S --> L["Claude<br/>Haiku / Sonnet"]
   Q --> L
-  Q --> E["embedding<br/>:8002"]
-  Q --> DB[("Supabase<br/>Postgres + pgvector")]
-  B --> DB
-  V["Finnhub<br/>SEC EDGAR<br/>FMP"] --> P["data-pipeline<br/>:8001"] --> DB
-
-  classDef mine fill:#DCE9FB,stroke:#3E6FB0,color:#12283F
-  class B,S mine
+  Q --> E["apps/embedding<br/>:8002"]
+  Q -->|"untracked tickers"| M["Finnhub / FMP<br/>libs/marketdata"]
+  A --> DB[("Supabase<br/>Postgres + pgvector")]
+  J["apps/jobs<br/>ingest · reports · briefings"] --> E
+  J --> M
+  J --> DB
 ```
 
-Blue is this repo. The backend authenticates, keeps the conversation, and picks
-**skill or RAG** — nothing else lives here.
+**One chat request:** the API verifies the Supabase JWT, asks the skill router
+whether a skill fits, and otherwise runs the RAG question flow in-process; the
+answer streams back over SSE and is saved with its citations.
 
-**One chat request:**
-
-```mermaid
-flowchart LR
-  A["question<br/>+ JWT"] --> B{"skill<br/>router"}
-  B -->|"match"| C["run skill"]
-  B -->|"no match"| D["RAG<br/>embed → search → generate"]
-  C --> E["stream SSE<br/>+ save to Supabase"]
-  D --> E
-```
-
-**One ingestion run:** `data-pipeline` pulls news, filings and quotes → cleans →
+**One ingestion run:** the ingest job pulls news, filings and quotes → cleans →
 chunks → embeds via `:8002` → upserts into Supabase. Nothing else writes those
 tables.
 
-| Tables | Owner |
-|---|---|
-| `documents` `earnings` `price_snapshot` `tracked_tickers` | data-pipeline |
-| `chat_sessions` `chat_messages` `user_files` `user_watchlist` `user_preferences` `daily_briefings` | backend |
-| `summary_cache` | Summarization |
-
-Schema for the shared tables lives in `../data-pipeline/pipeline/schema.sql`;
-`backend/migrations/` owns the user-scoped ones and their RLS policies.
-
-## The system
-
-Five repos, deliberately separate — each deploys on its own cadence.
-
-| Repo | Role | Port |
-|---|---|---|
-| **QuantAgent** (this one) | React UI + FastAPI BFF. Auth, watchlist, briefings, chat. | 3000 / 8000 |
-| [Summarization](https://github.com/ZeroNoise2026/Summarization) | `summary` CLI (research reports) + `question` service (RAG Q&A) | 8003 |
-| [data-pipeline](https://github.com/ZeroNoise2026/data-pipeline) | Ingest Finnhub / SEC EDGAR / FMP → clean → chunk → embed → Supabase | 8001 |
-| [embedding-service](https://github.com/ZeroNoise2026/embedding-service) | all-MiniLM-L6-v2, 384-dim vectors | 8002 |
-| [Skills](https://github.com/ZeroNoise2026/Skills) | Shared skill framework (`generate_report`, `compare_tickers`) | — |
-
-`./dev.sh sync` clones them **as siblings of this repo**, not inside it:
-
-```
-~/quantagent/
-├── QuantAgent/          <- you cloned this
-├── Skills/              <- pulled by ./dev.sh sync
-├── Summarization/
-├── data-pipeline/
-└── embedding-service/
-```
-
-Sibling, not nested, is load-bearing: every cross-repo import resolves through
-`Path(__file__).parents[N]` assuming exactly this shape. Nesting silently
-breaks skill discovery.
+**Models.** Haiku 5.5 handles chat answers, routing, structured JSON, short
+summaries and briefings; Sonnet 5.5 writes the research reports. Every call
+goes through the single client in `libs/common`.
 
 ## Layout
 
 ```
-QuantAgent/
-├── dev.sh                    stack bootstrap + launcher
-├── backend/                  FastAPI BFF
-│   ├── main.py               API server; routes skills before falling back to RAG
-│   ├── rag.py                proxies the question-service SSE stream
-│   ├── briefing.py           scheduled daily briefing generator
-│   ├── summarizer.py         Moonshot client for summaries + briefings
-│   ├── fetcher.py            TickerContext assembly from Supabase
-│   ├── db.py                 Supabase data access
-│   ├── auth.py               Supabase JWT verification
-│   ├── files/                upload, parse and preview (pdf/docx/xlsx/csv/txt)
-│   ├── migrations/           SQL migrations
-│   └── evals/                offline eval suite — see backend/evals/README.md
-└── frontend/                 React + Vite
-    └── src/pages/            Chat, Briefing, Watchlist, Login, Signup
+zeroNoise/
+├── .env.example          the one config template (copy to .env)
+├── dev.sh  deploy.sh     local stack · Cloud Run deploys
+├── .github/workflows/    CI + scheduled jobs
+├── docs/                 DEPLOY.md, architecture.html
+├── scripts/              check_boundaries.py
+├── apps/
+│   ├── api/              FastAPI :8000 — auth, user data, chat, RAG question flow
+│   ├── web/              React + Vite :3000
+│   ├── embedding/        all-MiniLM-L6-v2 vectors :8002
+│   └── jobs/             batch: ingest, reports, briefings, cache cleanup
+└── libs/
+    ├── common/           Claude client, Supabase client, audit log
+    ├── research/         ticker context, reports + cache, briefings, market-data reads
+    ├── skills/           skill framework: registry, LLM router, built-in skills
+    └── marketdata/       Finnhub / FMP / SEC EDGAR clients
+```
+
+Each directory has its own README: [apps/api](apps/api/README.md),
+[apps/jobs](apps/jobs/README.md), [apps/embedding](apps/embedding/README.md),
+[libs/skills](libs/skills/README.md).
+
+### Module boundaries
+
+**Apps never import each other, and libs never import apps.** Code two apps
+need goes in `libs/`; apps talk to each other only over HTTP.
+`scripts/check_boundaries.py` enforces this in CI and in `./dev.sh test`.
+
+| Lib | Used by | Owns |
+|---|---|---|
+| `libs/common` | everything Python | `common.llm` (chat, streaming, retries, refusal handling, audit), `common.supabase`, `common.audit` |
+| `libs/research` | api, jobs, skills | market-data reads, `TickerContext`, `build_report()` + `summary_cache`, `build_briefing()` + `daily_briefings` |
+| `libs/skills` | api, jobs | `Skill` base, registry, router; `generate_report`, `compare_tickers` |
+| `libs/marketdata` | api, jobs | `FinnhubClient`, `FMPClient`, `EdgarClient`, retry/backoff |
+
+## Configuration
+
+Everything lives in **one file: `.env` at the repo root** (gitignored).
+`./dev.sh setup` creates it from `.env.example`, keeping real defaults and
+leaving placeholders empty. Every Python app's `config.py` loads it; the web
+app reads it through Vite's `envDir` (only `VITE_*` keys reach the browser).
+In Cloud Run the same keys are injected by `deploy.sh`.
+
+| Key | Needed by |
+|---|---|
+| `ANTHROPIC_API_KEY` | api, jobs |
+| `SUPABASE_URL` `SUPABASE_KEY` | api, jobs |
+| `SUPABASE_JWT_SECRET` | api |
+| `FINNHUB_API_KEY` `FMP_API_KEY` `EDGAR_USER_AGENT` | jobs (ingest), api (live lookups) |
+| `VITE_SUPABASE_URL` `VITE_SUPABASE_PUBLISHABLE_KEY` | web |
+| `LLM_MODEL` · `LLM_MODEL_SUMMARY` · `LLM_MODEL_QA` · `LLM_MODEL_CLASSIFY` | summaries & briefings · reports · chat · router (defaults in `.env.example`) |
+
+Supabase values are under Dashboard → Project Settings → API. `SUPABASE_KEY`
+is the **service-role** key — server-side only, it bypasses RLS.
+
+```bash
+./dev.sh env          # which required keys are set (values masked)
+./dev.sh env pull     # new machine: fill the secrets in from GCP Secret Manager
 ```
 
 ## API
@@ -122,116 +125,78 @@ QuantAgent/
 | POST | `/api/chat/stream` | SSE chat — skill routing, then RAG |
 | GET/DELETE | `/api/chat/sessions` | Session list / bulk delete |
 | GET | `/api/chat/sessions/{id}/messages` | Session transcript |
-| POST | `/api/summarize` | On-demand ticker report |
+| POST | `/api/summarize` | On-demand ticker summary |
 | — | `/api/files/...` | Upload, list, preview, download, attach, delete |
 | GET | `/health` | Liveness |
 
-The frontend dev server proxies `/api` to `http://localhost:8000`, so no CORS
-configuration is needed locally. In production set `ALLOWED_ORIGINS`.
+Every route except `/health` requires `Authorization: Bearer <supabase jwt>`.
+The web dev server proxies `/api` to `http://localhost:8000`, so no CORS setup
+is needed locally; in production set `ALLOWED_ORIGINS`.
 
-## Authentication
+## Data
 
-Supabase Auth (email + password). Every backend route requires
-`Authorization: Bearer <jwt>`.
+| Tables | Written by |
+|---|---|
+| `documents` `earnings` `price_snapshot` `tracked_tickers` | apps/jobs (ingest) |
+| `chat_sessions` `chat_messages` `user_files` `user_watchlist` `user_preferences` | apps/api |
+| `daily_briefings` `summary_cache` | libs/research (api + jobs) |
+| `api_audit_log` | libs/common |
 
-One-time Supabase setup:
+Every table's DDL: `apps/jobs/pipeline/schema.sql`. User-scoped RLS
+policies: `apps/api/migrations/`.
+
+### One-time Supabase auth setup
 
 1. **Authentication → Providers → Email**: enable.
 2. **Authentication → Settings → Confirm email**: off for dev, otherwise users
    cannot log in until they click the confirmation mail.
-3. **Project Settings → API → JWT Settings**: copy the JWT Secret into
-   `backend/.env` as `SUPABASE_JWT_SECRET`.
-4. Run `backend/migrations/002_auth_uuid_rls.sql` in the SQL editor.
+3. **Project Settings → API → JWT Settings**: copy the JWT secret into `.env`
+   as `SUPABASE_JWT_SECRET`.
+4. Run `apps/api/migrations/002_auth_uuid_rls.sql` in the SQL editor.
    ⚠️ It **TRUNCATEs** `chat_sessions`, `chat_messages`, `user_watchlist`,
-   `user_preferences`, `daily_briefings` — the old localStorage user ids cannot
-   be mapped onto real `auth.users.id` rows.
+   `user_preferences`, `daily_briefings`.
 
-Database schema lives in `../data-pipeline/pipeline/schema.sql` (single source
-of truth for every table in the project).
-
-## Credentials
-
-`./dev.sh setup` writes an `.env` per service with the keys listed and the
-values blank. You need:
-
-| Where | Keys |
-|---|---|
-| `backend/.env` | `SUPABASE_URL` `SUPABASE_KEY` `SUPABASE_JWT_SECRET` `MOONSHOT_API_KEY` |
-| `frontend/.env.local` | `VITE_SUPABASE_URL` `VITE_SUPABASE_PUBLISHABLE_KEY` |
-| `../Summarization/.env` | `SUPABASE_URL` `SUPABASE_KEY` `MOONSHOT_API_KEY` |
-| `../data-pipeline/.env` | `SUPABASE_URL` `SUPABASE_KEY` `FINNHUB_API_KEY` `FMP_API_KEY` `EDGAR_USER_AGENT` |
-| `../embedding-service/.env` | none required |
-
-Supabase values: Dashboard → Project Settings → API (the JWT secret is under
-API → JWT Settings). `SUPABASE_KEY` is the **service-role** key — server-side
-only, it bypasses RLS.
-
-`./dev.sh doctor` treats placeholder values (`sk-xxxxxxxx`,
-`your-supabase-service-role-key`) as missing, so copying `.env.example` by hand
-will not fool it.
-
-## Evals
-
-`backend/evals/` is an offline eval suite for `summarizer.py`: deterministic
-structural checks first, then a claim-level LLM judge for faithfulness.
+## Development
 
 ```bash
-./dev.sh eval                 # n=3 per fixture, thresholds enforced, exit 1 on failure
-./dev.sh eval --no-judge      # structural checks only — free and instant
+./dev.sh                 # setup + doctor (idempotent, start here)
+./dev.sh setup [svc...]  # venvs, deps, editable libs, .env scaffold
+./dev.sh doctor          # what is ready, what is blocked, and why
+./dev.sh up [svc...]     # start services; refuses any with missing credentials
+./dev.sh down / status / logs <svc>
+./dev.sh job <name>      # ingest | reports | briefing | cleanup
+./dev.sh test            # every offline suite + boundary check, zero credentials
+./dev.sh sync            # git pull --ff-only
 ```
 
-It needs only `MOONSHOT_API_KEY` — no Supabase, no running services. See
-[`backend/evals/README.md`](backend/evals/README.md) for what is measured, the
-thresholds, and the design notes.
+Services: `embedding` `api` `frontend`; `jobs` is set up too but only runs on
+demand.
+
+- **One venv per app.** Libs are installed **editable** into each venv that
+  needs them, so edits take effect without a reinstall.
+- **`up` refuses to start a service whose credentials are missing** instead of
+  letting it die in a stack trace.
+- **`.env` scaffolding never overwrites** an existing `.env`, and treats
+  placeholders (`sk-xxxxxxxx`, `your-…`, `<…>`) as missing.
+
+```bash
+./dev.sh job reports --ticker AAPL                          # research report → apps/jobs/output/
+./dev.sh job reports --skill compare_tickers --args '{"tickers":["AAPL","MSFT"]}'
+./dev.sh job ingest --ticker AAPL --dry-run                 # needs ./dev.sh up embedding
+```
 
 ## Deployment
 
-`backend/Dockerfile` is Cloud Run ready and honours `$PORT`. Note that the
-build context is `backend/`, so it cannot reach the sibling `Skills` repo —
-`requirements.txt` therefore installs the skills package straight from git.
-Without that line, skill routing silently degrades to RAG on every request.
+`./deploy.sh` builds `api` and `embedding` and deploys them to Cloud Run,
+wiring service URLs and mounting secrets from Secret Manager — see
+[docs/DEPLOY.md](docs/DEPLOY.md). The web app deploys to Vercel
+(`./deploy.sh frontend` prints the steps). Batch jobs run from GitHub Actions:
+`jobs-report-cache-cleanup.yml` is scheduled daily; `jobs-ingest.yml` and
+`jobs-briefing.yml` ship with their cron commented out until the repo secrets
+are configured.
 
-## dev.sh
+## Not in this repo
 
-```bash
-./dev.sh                 # sync + setup + doctor  (idempotent, start here)
-./dev.sh sync            # clone/pull the sibling repos
-./dev.sh setup [svc...]  # venvs, deps, .env scaffolding
-./dev.sh doctor          # what is ready, what is blocked, and why
-./dev.sh test            # offline suites — zero credentials needed
-./dev.sh eval            # summarizer eval suite (needs MOONSHOT_API_KEY)
-./dev.sh up [svc...]     # start services; refuses any with missing credentials
-./dev.sh down / status / logs <svc>
-```
-
-Services: `embedding` `pipeline` `question` `backend` `frontend`.
-Use `GIT_PROTOCOL=ssh ./dev.sh sync` if you prefer SSH remotes.
-
-Notes on behaviour that surprises people:
-
-- **One venv per service, not one shared.** Summarization pins
-  `fastapi==0.104.1` / `pydantic==2.5.0`; this backend is unpinned. A shared
-  venv silently breaks one of them.
-- **`up` refuses to start a service whose credentials are missing**, instead of
-  starting it and dying inside a stack trace.
-- **`.env` scaffolding keeps real defaults and empties only placeholders.**
-  Blanking everything would break `embedding-service`, whose config does
-  `int(os.getenv("EMBEDDING_DIM", "384"))` — a present-but-empty var is not the
-  default, it is `int("")`. Existing `.env` files are never overwritten.
-- `dev.sh` installs `Skills` **editable from the local clone**, overriding the
-  git pin in `requirements.txt`, so edits there take effect without a push.
-
-## Running without dev.sh
-
-```bash
-cd backend
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --port 8000 --reload
-
-cd ../frontend
-npm install && npm run dev          # http://localhost:3000
-```
-
-The briefing job runs hourly via GitHub Actions and generates a briefing when a
-user's local time is 08:00–08:14; test it with `python backend/briefing.py`.
+- **Voice assistant** — a generic, reusable module in its own repo
+  (`voiceAI-plugin`); it talks to the API over HTTP.
+- **Eval harness** — being rewritten as a separate repo.

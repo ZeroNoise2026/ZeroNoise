@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  boundaries:
+    # Apps never import each other; libs never import apps.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python scripts/check_boundaries.py
+
+  tests:
+    # Offline suites only — no credentials, no network services. Runs on
+    # case-sensitive Linux, which is where import-path bugs surface.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            apps/api/requirements.txt
+            apps/jobs/requirements.txt
+
+      - name: Install libs and apps
+        run: |
+          pip install -e libs/common -e libs/research -e libs/skills -e libs/marketdata
+          pip install -r apps/api/requirements.txt -r apps/jobs/requirements.txt
+
+      - name: libs
+        run: |
+          python -m pytest -q libs/research/tests
+          cd libs/skills && python -m skills.tests.test_smoke
+
+      - name: apps/api
+        working-directory: apps/api
+        run: python -m pytest -q tests
+
+      - name: apps/jobs
+        working-directory: apps/jobs
+        run: python -m pytest -q tests

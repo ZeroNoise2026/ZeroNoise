@@ -1,0 +1,55 @@
+name: Scheduled Data Ingestion
+
+on:
+  # schedule:
+  #   - cron: '0 */6 * * *'  # Every 6 hours (uncomment when ready)
+  workflow_dispatch:
+
+env:
+  SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+  SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+  EMBEDDING_SERVICE_URL: ${{ secrets.EMBEDDING_SERVICE_URL }}
+  FINNHUB_API_KEY: ${{ secrets.FINNHUB_API_KEY }}
+  FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+  EDGAR_USER_AGENT: ${{ secrets.EDGAR_USER_AGENT }}
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            apps/jobs/requirements.txt
+            apps/embedding/requirements.txt
+
+      - name: Install jobs deps
+        run: pip install ./libs/common ./libs/research ./libs/skills ./libs/marketdata -r apps/jobs/requirements.txt
+
+      # ── embedding service ──────────────────────────────────────
+      - name: Install embedding deps
+        run: pip install -r apps/embedding/requirements.txt
+
+      - name: Start embedding service
+        working-directory: apps/embedding
+        run: uvicorn app.main:app --port 8002 &
+
+      - name: Wait for embedding-service
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8002/health && echo "Embedding service ready" && exit 0
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+          echo "Embedding service failed to start" && exit 1
+
+      # ── run pipeline ───────────────────────────────────────────
+      - name: Run ingestion pipeline
+        working-directory: apps/jobs
+        run: python -m pipeline.run

@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zeronoise-research"
+version = "0.1.0"
+description = "Ticker context, report generation and report cache"
+requires-python = ">=3.10"
+# Also needs libs/common (installed alongside it; not listed because it is a
+# local path, not a published package).
+dependencies = []
+
+[tool.setuptools]
+packages = ["research"]

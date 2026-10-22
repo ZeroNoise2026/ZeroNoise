@@ -1,0 +1,10 @@
+# Also needs libs/common, libs/research, libs/skills and libs/marketdata;
+# dev.sh and the Dockerfile install them from the monorepo checkout.
+python-dotenv>=1.0.0
+supabase>=2.3.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+prefect>=3.0.0
+
+# tests
+pytest
