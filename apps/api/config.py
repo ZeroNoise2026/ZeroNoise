@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv(next((d / ".env" for d in Path(__file__).resolve().parents if (d / ".env").is_file()), None))
 
 # ═══════════════════════════════════════════
-# 1. Auth, user-facing summaries, briefings
+# 1. Auth and on-demand summaries
 # ═══════════════════════════════════════════
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 # JWT secret for verifying Supabase Auth access tokens (legacy HS256).
@@ -28,7 +28,6 @@ LLM_MODEL = os.getenv("LLM_MODEL", "claude-haiku-5-5")
 # "low" | "medium" | "high" — thinking depth for summaries and briefings
 LLM_EFFORT = os.getenv("LLM_EFFORT", "medium")
 
-BRIEFING_WINDOW_MINUTES = int(os.getenv("BRIEFING_WINDOW_MINUTES", "15"))
 
 # ═══════════════════════════════════════════
 # 2. Question flow: models

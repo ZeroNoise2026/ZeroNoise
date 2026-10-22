@@ -1,7 +1,7 @@
 """
 Embedding Service — FastAPI Application
-Shared embedding service used by both data-pipeline (encode docs) and
-copilot-template (encode user queries).
+Shared embedding service used by both the ingestion job (encode docs) and
+the API's question flow (encode user queries).
 
 Endpoints:
   POST /api/encode        — batch encode texts → vectors

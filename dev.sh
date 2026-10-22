@@ -15,6 +15,7 @@
 #   ./dev.sh down [svc...]   stop them
 #   ./dev.sh status          which services are up
 #   ./dev.sh logs <svc>      tail a service log
+#   ./dev.sh job <name> [args]  run a batch job: ingest | reports | briefing | cleanup
 #   ./dev.sh env             which keys in .env are set (values masked)
 #   ./dev.sh env pull        fill .env's secrets from GCP Secret Manager
 #
@@ -25,8 +26,7 @@
 #   apps/api            FastAPI: auth, user data, chat, RAG   (service: api)
 #   apps/web            React frontend                        (service: frontend)
 #   apps/embedding      embedding API                         (service: embedding)
-#   apps/summarization  summary CLI (batch)
-#   apps/pipeline       batch ingestion (a job, not a service)
+#   apps/jobs           batch jobs: ingestion, reports, briefings, cache cleanup
 #   libs/common         Claude client, Supabase client, audit log
 #   libs/research       ticker context, report generation + cache
 #   libs/skills         skill framework: registry, LLM router, built-in skills
@@ -79,6 +79,7 @@ svc_path() {
   case "$1" in
     embedding) echo "$ROOT/apps/embedding" ;;
     api)       echo "$ROOT/apps/api" ;;
+    jobs)      echo "$ROOT/apps/jobs" ;;   # python app, not a long-running service
     frontend)  echo "$ROOT/apps/web" ;;
     *) return 1 ;;
   esac
@@ -114,7 +115,7 @@ svc_start_cmd() {
 # libs/ packages each Python service imports (installed editable by setup).
 svc_libs() {
   case "$1" in
-    api)      echo "common research skills marketdata" ;;
+    api|jobs) echo "common research skills marketdata" ;;
     *)        echo "" ;;
   esac
 }
@@ -242,20 +243,11 @@ cmd_setup() {
   head1 "SETUP"
   scaffold_env
   for s in $svcs; do
+    [ "$s" = jobs ] && continue   # handled below
     if is_node_svc "$s"; then setup_frontend; else setup_python_svc "$s"; fi
   done
-  # libs/ is not a service, but its offline suites are the fastest proof the
-  # codebase is intact — give it one shared venv. Non-fatal.
-  local lv="$ROOT/libs/venv"
-  if [ ! -x "$lv/bin/python" ]; then
-    if python3 -m venv "$lv" \
-       && "$lv/bin/python" -m pip install --quiet --upgrade pip >/dev/null \
-       && "$lv/bin/python" -m pip install --quiet -e "$ROOT/libs/common" -e "$ROOT/libs/research" -e "$ROOT/libs/skills" -e "$ROOT/libs/marketdata"; then
-      ok "libs: venv ready (editable install)"
-    else
-      warn "libs: editable install failed — ./dev.sh test will skip the libs suites"
-    fi
-  fi
+  # apps/jobs is not a service, but it needs a venv for `./dev.sh job`.
+  case " $* " in "  "|*" jobs "*) setup_python_svc jobs ;; esac
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -301,16 +293,22 @@ cmd_doctor() {
 # ─────────────────────────────────────────────────────────────
 cmd_test() {
   head1 "OFFLINE SUITES (no credentials)"
-  local rc=0
-  if [ -x "$ROOT/libs/venv/bin/python" ]; then
-    say "  skills smoke suite:"
-    ( cd "$ROOT/libs/skills" && "$ROOT/libs/venv/bin/python" -m skills.tests.test_smoke ) || rc=1
+  local rc=0 api="$ROOT/apps/api/venv/bin/python" jobs="$ROOT/apps/jobs/venv/bin/python"
+  if [ -x "$api" ]; then
+    # The api venv has every lib installed editable, so it runs the libs suites too.
+    say "  libs:"
+    "$api" -m pytest -q "$ROOT/libs/research/tests" || rc=1
+    ( cd "$ROOT/libs/skills" && "$api" -m skills.tests.test_smoke ) || rc=1
+    say ""; say "  apps/api:"
+    ( cd "$ROOT/apps/api" && "$api" -m pytest -q tests ) || rc=1
   else
-    warn "libs venv missing -> ./dev.sh setup"; rc=1
+    warn "api venv missing -> ./dev.sh setup api"; rc=1
   fi
-  if [ -x "$ROOT/apps/summarization/venv/bin/python" ]; then
-    say ""; say "  summarization tests:"
-    ( cd "$ROOT/apps/summarization" && ./venv/bin/python -m pytest -q tests ) || rc=1
+  if [ -x "$jobs" ]; then
+    say ""; say "  apps/jobs:"
+    ( cd "$ROOT/apps/jobs" && "$jobs" -m pytest -q tests ) || rc=1
+  else
+    warn "jobs venv missing -> ./dev.sh setup jobs"; rc=1
   fi
   say ""; say "  module boundaries:"
   python3 "$ROOT/scripts/check_boundaries.py" || rc=1
@@ -359,6 +357,24 @@ cmd_env() {
     pull)   head1 "PULL"; env_pull ;;
     *)      die "unknown: env $1 (status|pull)" ;;
   esac
+}
+
+# ─────────────────────────────────────────────────────────────
+# jobs
+# ─────────────────────────────────────────────────────────────
+cmd_job() {
+  local name="${1:-}" py="$ROOT/apps/jobs/venv/bin/python" mod
+  [ "$#" -gt 0 ] && shift
+  case "$name" in
+    ingest)   mod="pipeline.run"; running embedding || warn "embedding is not running — ingestion needs it (./dev.sh up embedding)" ;;
+    reports)  mod="reports.run" ;;
+    briefing) mod="briefing" ;;
+    cleanup)  mod="reports.cleanup" ;;
+    *)        die "usage: ./dev.sh job ingest|reports|briefing|cleanup [args...]" ;;
+  esac
+  [ -x "$py" ] || die "jobs venv missing. Run: ./dev.sh setup jobs"
+  head1 "JOB  $name"
+  ( cd "$ROOT/apps/jobs" && "$py" -m "$mod" "$@" )
 }
 
 # ─────────────────────────────────────────────────────────────
@@ -463,7 +479,7 @@ cmd_logs() {
   tail -f "$LOGS/$1.log"
 }
 
-usage() { sed -n '2,42p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
+usage() { sed -n '2,43p' "$0" | sed 's/^#\{1,2\} \{0,1\}//;s/^#$//'; }
 
 main() {
   local cmd="${1:-default}"; [ "$#" -gt 0 ] && shift || true
@@ -478,6 +494,7 @@ main() {
     status|ps)      cmd_status ;;
     logs)           cmd_logs "$@" ;;
     env)            cmd_env "$@" ;;
+    job)            cmd_job "$@" ;;
     -h|--help|help) usage ;;
     *)              die "unknown command '$cmd' (try ./dev.sh --help)" ;;
   esac

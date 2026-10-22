@@ -5,8 +5,8 @@ Shared skill framework.
 A "skill" is a self-contained capability (generate a research report, compare
 tickers, etc.) that can be invoked from any consumer:
 
-  - apps/backend (chat endpoint → LLM router → skill)
-  - the summary CLI in apps/summarization (python -m summary.run --skill <name>)
+  - apps/api (chat endpoint → LLM router → skill)
+  - the report job in apps/jobs (python -m reports.run --skill <name>)
 
 Each skill lives in its own subdirectory under skills/, containing:
   - SKILL.md   description of when/how to use the skill (read by the router LLM)

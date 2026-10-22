@@ -34,7 +34,7 @@ class TickerContext:
     # "regulatory:<doc_id>", "earnings_doc:<doc_id>",
     # "earnings_row:<ticker>:<quarter>", "price:<ticker>:<date>", ...].
     # Always sorted for deterministic hashing.
-    # Invariant: documents.id is a SHA256 of content (see apps/pipeline), so
+    # Invariant: documents.id is a SHA256 of content (see apps/jobs/pipeline), so
     # same id => same content; we never need to hash the text bodies.
     source_doc_ids: list[str] = field(default_factory=list)
 

@@ -80,7 +80,7 @@ svc_context() {
   esac
 }
 # `gcloud run deploy --source .` only ever looks for a file named "Dockerfile".
-# apps/summarization has two images, so we always build explicitly.
+# Images build from explicit Dockerfiles, never buildpack autodetection.
 svc_dockerfile() {
   case "$1" in
     embedding) echo "Dockerfile" ;;
@@ -99,7 +99,6 @@ svc_label() {
 svc_secret_vars() {
   case "$1" in
     embedding) echo "" ;;
-    pipeline)  echo "SUPABASE_KEY FINNHUB_API_KEY FMP_API_KEY" ;;
     api)       echo "SUPABASE_KEY SUPABASE_JWT_SECRET ANTHROPIC_API_KEY FINNHUB_API_KEY FMP_API_KEY" ;;
   esac
 }
@@ -107,7 +106,6 @@ svc_secret_vars() {
 svc_plain_vars() {
   case "$1" in
     embedding) echo "EMBEDDING_MODEL EMBEDDING_DIM" ;;
-    pipeline)  echo "SUPABASE_URL EDGAR_USER_AGENT DEFAULT_TICKERS" ;;
     api)       echo "SUPABASE_URL LLM_MODEL LLM_EFFORT LLM_MODEL_SUMMARY LLM_MODEL_QA LLM_MODEL_CLASSIFY LLM_EFFORT_QA ALLOWED_ORIGINS ALLOWED_ORIGIN_REGEX" ;;
   esac
 }
@@ -116,7 +114,6 @@ svc_plain_vars() {
 svc_wired_vars() {
   case "$1" in
     embedding) echo "" ;;
-    pipeline)  echo "EMBEDDING_SERVICE_URL" ;;
     api)       echo "EMBEDDING_SERVICE_URL" ;;
   esac
 }
@@ -129,7 +126,6 @@ svc_wired_vars() {
 svc_sizing() {
   case "$1" in
     embedding) echo "2Gi 1 0 3 8 300" ;;
-    pipeline)  echo "512Mi 1 0 2 20 900" ;;
     api)       echo "512Mi 1 0 5 40 600" ;;
   esac
 }
@@ -264,7 +260,7 @@ cmd_preflight() {
     file="$(svc_envfile "$s")"; miss=""
     printf '\n  %s%-10s%s %s\n' "$C_BOLD" "$s" "$C_RESET" "$(svc_label "$s")"
     for k in $(svc_secret_vars "$s") $(svc_plain_vars "$s"); do
-      case "$k" in ALLOWED_ORIGIN_REGEX|DEFAULT_TICKERS|LLM_EFFORT|LLM_EFFORT_QA) continue ;; esac   # genuinely optional
+      case "$k" in ALLOWED_ORIGIN_REGEX|ALLOWED_ORIGINS|LLM_EFFORT|LLM_EFFORT_QA) continue ;; esac   # genuinely optional
       v="$(env_val "$file" "$k" 2>/dev/null || true)"
       looks_placeholder "$v" && miss="$miss $k"
     done
@@ -406,8 +402,8 @@ build_image() {
   ensure_gcloudignore "$dir"
   mkdir -p "$STATE"
   cfg="$STATE/cloudbuild.$svc.yaml"
-  # Explicit docker build rather than --source: apps/summarization holds two
-  # images, and buildpack autodetection would pick the wrong entrypoint.
+  # Explicit docker build rather than --source: the repo-root build context
+  # holds many Dockerfiles, and autodetection would pick the wrong one.
   cat > "$cfg" <<YAML
 steps:
   - name: 'gcr.io/cloud-builders/docker'

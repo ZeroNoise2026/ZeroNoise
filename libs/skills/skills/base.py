@@ -12,7 +12,7 @@ and implements:
   - run(**kwargs) -> SkillResult
 
 Skills are *synchronous* on purpose — both consumers (the summary CLI and the
-backend chat endpoint) are sync today, and the bottleneck is the LLM
+API chat endpoint) are sync today, and the bottleneck is the LLM
 call, not concurrency. If a skill needs concurrency internally it can use
 threads or asyncio.run() inside run().
 
@@ -40,7 +40,7 @@ logger = logging.getLogger("skills")
 class SkillResult:
     """Uniform return type so callers don't have to special-case each skill.
 
-    - content:   primary human-readable output (markdown). For the backend this
+    - content:   primary human-readable output (markdown). For the API chat this
                  is what gets streamed/displayed to the user.
     - data:      optional structured payload (tables, raw rows) for callers
                  that want to render their own UI on top.

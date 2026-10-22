@@ -2,7 +2,7 @@
 research/cache.py
 DB-backed cache for generated investment reports.
 
-Schema: see apps/pipeline/pipeline/schema.sql `summary_cache`.
+Schema: see apps/jobs/pipeline/schema.sql `summary_cache`.
 Key idea: input_hash = SHA256(sorted source doc IDs + model + prompt_version),
 so an identical input always hits the cache without re-calling the LLM.
 

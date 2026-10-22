@@ -31,7 +31,7 @@ def is_tracked(ticker: str) -> bool:
 
 
 def is_ingested(ticker: str) -> bool:
-    """Check if a ticker is tracked AND the data-pipeline has ingested it at least once.
+    """Check if a ticker is tracked AND the ingestion job has ingested it at least once.
 
     A freshly promoted ticker is tracked but has no documents until the next
     pipeline run; routing it to Tier 1 before then would retrieve nothing.
@@ -101,7 +101,7 @@ def update_last_queried(ticker: str) -> None:
 def promote_ticker(ticker: str, ticker_type: str = "stock") -> None:
     """Hot promotion: insert an untracked ticker into tracked_tickers.
 
-    The data-pipeline will start fetching data for this ticker on its next run.
+    The ingestion job will start fetching data for this ticker on its next run.
     Until then is_ingested() keeps it on the Tier 2 live-fetch path.
     """
     client = _get_client()

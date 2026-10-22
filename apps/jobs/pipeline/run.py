@@ -191,7 +191,7 @@ def _quarter_label(date_str: str) -> str:
 
     Used as the `quarter` upsert key in the earnings table. Must be consistent
     across all data sources (Finnhub, FMP) to avoid duplicate rows for the same
-    fiscal period. Downstream consumers (question-service YoY calc) parse this
+    fiscal period. Downstream consumers (the API's YoY calc) parse this
     via regex `Q([1-4])\\s+(\\d{4})`.
 
     Examples:

@@ -1,4 +1,4 @@
-// Mirrors backend/files/constants.py.
+// Mirrors apps/api/files/constants.py.
 // Keep these in sync.
 
 export const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024

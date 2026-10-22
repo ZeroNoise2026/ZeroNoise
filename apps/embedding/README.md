@@ -1,4 +1,4 @@
-# embedding-service
+# apps/embedding
 
 > Shared vectorization service for the zeroNoise stack.
 
@@ -12,7 +12,7 @@ checking whether your setup works at all.
 
 ## Why it is a separate service
 
-Both `data-pipeline` (at ingest time, in batches) and `Summarization/question`
+Both the ingestion job `apps/jobs/pipeline` (in batches) and `apps/api/question`
 (at query time, one query at a time) need vectors, and both must use **the same
 model** or cosine similarity is meaningless. Rather than pin the model in two
 places and hope they stay in sync, it lives here once. Changing
@@ -61,7 +61,7 @@ latency.
 | Variable | Default | Purpose |
 |---|---|---|
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | sentence-transformers model name |
-| `EMBEDDING_DIM` | `384` | Must match the model **and** the pgvector column width in `data-pipeline/pipeline/schema.sql` |
+| `EMBEDDING_DIM` | `384` | Must match the model **and** the pgvector column width in `apps/jobs/pipeline/schema.sql` |
 | `PORT` | `8002` | Listen port |
 
 ⚠️ These have real defaults, so do not blank them out in `.env` — `config.py`
@@ -84,8 +84,8 @@ model-load cost on the request path.
 
 | Service | How it calls this one |
 |---|---|
-| [pipeline](../pipeline) | `POST /api/encode` for every batch of chunks at ingest, 100 per request |
-| [summarization](../summarization) (`question`) | `POST /api/encode-query` per user query; also `/api/encode` to batch-encode expanded queries for multi-vector retrieval |
+| [jobs/pipeline](../jobs/pipeline) | `POST /api/encode` for every batch of chunks at ingest, 100 per request |
+| [api](../api) (`question/`) | `POST /api/encode-query` per user query; also `/api/encode` to batch-encode expanded queries for multi-vector retrieval |
 
 Both reach it via `EMBEDDING_SERVICE_URL`, default `http://localhost:8002`.
 Neither has a fallback: if this service is down, ingestion stops and RAG

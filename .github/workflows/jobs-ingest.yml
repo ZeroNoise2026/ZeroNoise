@@ -26,11 +26,11 @@ jobs:
           python-version: '3.11'
           cache: 'pip'
           cache-dependency-path: |
-            apps/pipeline/requirements.txt
+            apps/jobs/requirements.txt
             apps/embedding/requirements.txt
 
-      - name: Install pipeline deps
-        run: pip install -r apps/pipeline/requirements.txt
+      - name: Install jobs deps
+        run: pip install ./libs/common ./libs/research ./libs/skills ./libs/marketdata -r apps/jobs/requirements.txt
 
       # ── embedding service ──────────────────────────────────────
       - name: Install embedding deps
@@ -51,5 +51,5 @@ jobs:
 
       # ── run pipeline ───────────────────────────────────────────
       - name: Run ingestion pipeline
-        working-directory: apps/pipeline
+        working-directory: apps/jobs
         run: python -m pipeline.run

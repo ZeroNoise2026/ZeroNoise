@@ -1,6 +1,6 @@
 """Smoke tests for research.cache.compute_input_hash.
 
-Run: python -m tests.test_cache  (from apps/summarization/)
+Run: python -m pytest libs/research/tests   (from the repo root)
 """
 from research.cache import compute_input_hash
 from research.context import TickerContext
@@ -10,7 +10,7 @@ def _ctx(ticker="AAPL", ids=None):
     return TickerContext(ticker=ticker, source_doc_ids=list(ids or []))
 
 
-def main():
+def test_all():
     # 1. Determinism: same input -> same hash, repeatable.
     ctx = _ctx(ids=["news:a", "news:b", "filing:c"])
     h1 = compute_input_hash(ctx, "claude-sonnet-5-5", "v1")
@@ -57,4 +57,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    test_all()

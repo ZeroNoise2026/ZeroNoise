@@ -1,6 +1,7 @@
 """
 summarizer.py
-Short on-demand ticker summaries and multi-ticker daily briefings.
+Short on-demand ticker summaries (/api/summarize). Daily briefings live in
+research.briefing.
 """
 
 from common.llm import chat
@@ -22,19 +23,6 @@ Cover these areas briefly:
 - Key news & risks
 - Outlook"""
 
-BRIEFING_SYSTEM_PROMPT = """You are a senior financial analyst. Generate a concise daily briefing for the user's watchlist.
-
-Requirements:
-1. For each ticker, write a short paragraph (80-120 words) covering:
-   - Current price & recent move
-   - Key news (if any)
-   - Any notable financial data
-2. Use Markdown with ## headers for each ticker
-3. Be factual — cite specific numbers and dates
-4. End with a brief 2-sentence overall market outlook
-5. If no meaningful data exists for a ticker, note it briefly and move on"""
-
-
 def _call_llm(system_prompt: str, user_prompt: str) -> str:
     content, _usage = chat(
         messages=[
@@ -43,7 +31,7 @@ def _call_llm(system_prompt: str, user_prompt: str) -> str:
         ],
         model=LLM_MODEL,
         effort=LLM_EFFORT,
-        service="backend",
+        service="api",
     )
     return content
 
@@ -62,22 +50,3 @@ def generate_summary(ctx: TickerContext) -> str:
     user_prompt = "\n\n".join(sections)
 
     return _call_llm(SUMMARY_SYSTEM_PROMPT, user_prompt)
-
-
-def generate_briefing(contexts: list[TickerContext]) -> str:
-    """Generate a multi-ticker daily briefing."""
-    sections = ["Generate a daily investment briefing for the following watchlist tickers.\n"]
-    for ctx in contexts:
-        parts = [f"### {ctx.ticker}"]
-        if ctx.price_text:
-            parts.append(f"Price data:\n{ctx.price_text}")
-        if ctx.earnings_text:
-            parts.append(f"Earnings:\n{ctx.earnings_text}")
-        if ctx.news_text:
-            parts.append(f"Recent news:\n{ctx.news_text[:3000]}")
-        if not ctx.price_text and not ctx.news_text:
-            parts.append("(Limited data available)")
-        sections.append("\n".join(parts))
-    user_prompt = "\n\n---\n\n".join(sections)
-
-    return _call_llm(BRIEFING_SYSTEM_PROMPT, user_prompt)

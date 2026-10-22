@@ -1,5 +1,5 @@
-"""summary.run._parse_skill_args accepts JSON or k=v pairs."""
-from summary.run import _parse_skill_args
+"""reports.run._parse_skill_args accepts JSON or k=v pairs."""
+from reports.run import _parse_skill_args
 
 
 def test_empty_input():

@@ -4,7 +4,7 @@ from question.templates.filters import money, pct
 from question.templates.functions import yoy, qoq, render_table
 
 
-def main():
+def test_all():
     # 1. filters
     assert money(24_900_000_000) == "$24.9B", money(24_900_000_000)
     assert money(840_000_000) == "$840M", money(840_000_000)
@@ -76,4 +76,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    test_all()

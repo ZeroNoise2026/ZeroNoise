@@ -1,10 +1,10 @@
 """
-summary/cleanup.py
+reports/cleanup.py
 Delete summary_cache rows older than RETENTION_DAYS (default 90).
 
 Usage:
-    python -m summary.cleanup           # actually delete
-    python -m summary.cleanup --dry-run # report only, no DB writes
+    python -m reports.cleanup           # actually delete
+    python -m reports.cleanup --dry-run # report only, no DB writes
 
 Schedule: daily via .github/workflows/summary-cleanup.yml.
 """
@@ -22,7 +22,7 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
-logger = logging.getLogger("summary.cleanup")
+logger = logging.getLogger("reports.cleanup")
 
 RETENTION_DAYS = 90
 

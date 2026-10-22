@@ -1,7 +1,7 @@
 """
 research/data.py
 Read-only queries over the ingested market data (documents, earnings,
-price_snapshot, tracked_tickers). Writers live in apps/pipeline.
+price_snapshot, tracked_tickers). Writers live in apps/jobs/pipeline.
 """
 
 import logging

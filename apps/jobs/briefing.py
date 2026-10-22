@@ -1,14 +1,12 @@
 """
 briefing.py
-Timezone-aware daily briefing scheduler.
+Timezone-aware daily briefing job. Run it hourly:
 
-Called hourly via GitHub Actions. For each user with briefing_enabled=True:
-  - Check if their local time is in the 08:00-08:14 window
-  - Check if today's briefing already exists
-  - If both pass, generate and upsert the briefing
+    python -m briefing          (from apps/jobs/)
 
-Usage:
-    python briefing.py
+For each user with briefing_enabled=True and a non-empty watchlist, generate
+today's briefing if their local time is in the 08:00 window and it doesn't
+exist yet.
 """
 
 import logging
@@ -17,9 +15,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from config import BRIEFING_WINDOW_MINUTES
-from db import get_users_needing_briefing, briefing_exists, upsert_briefing
-from research.context import fetch_context
-from summarizer import generate_briefing
+from research.briefing import briefing_exists, build_briefing, get_users_needing_briefing
 
 logging.basicConfig(
     level=logging.INFO,
@@ -56,29 +52,15 @@ def process_user(user: dict) -> bool:
         return False
 
     logger.info(f"  {user_id}: generating briefing for {local_date} ({tickers})")
-
-    contexts = []
-    for ticker in tickers:
-        try:
-            ctx = fetch_context(ticker, news_limit=50)
-            if ctx.total_chars > 0:
-                contexts.append(ctx)
-        except Exception as e:
-            logger.error(f"  Failed to fetch {ticker}: {e}")
-
-    if not contexts:
-        logger.warning(f"  {user_id}: no data for any ticker, skipping")
-        return False
-
     try:
-        content = generate_briefing(contexts)
-        header = f"# Daily Briefing — {local_date}\n\n> Tickers: {', '.join(tickers)}\n\n"
-        upsert_briefing(user_id, local_date, header + content, tickers)
-        logger.info(f"  {user_id}: briefing saved for {local_date}")
-        return True
+        if build_briefing(user_id, tickers, local_date) is None:
+            logger.warning(f"  {user_id}: no data for any ticker, skipping")
+            return False
     except Exception as e:
         logger.error(f"  {user_id}: failed to generate briefing: {e}")
         return False
+    logger.info(f"  {user_id}: briefing saved for {local_date}")
+    return True
 
 
 def main():

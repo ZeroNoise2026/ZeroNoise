@@ -55,7 +55,7 @@ the Dockerfiles install it from the same checkout.
 
 | Name | Purpose | Required args | Returns |
 |---|---|---|---|
-| `generate_report` | Full investment-analysis report for one ticker | `ticker: str` | Markdown + artifact at `apps/summarization/output/{TICKER}_{DATE}.md` |
+| `generate_report` | Full investment-analysis report for one ticker | `ticker: str` | Markdown + artifact at `$REPORT_OUTPUT_DIR/{TICKER}_{DATE}.md` |
 | `compare_tickers` | Side-by-side comparison of 2+ tickers | `tickers: list[str]` | Markdown (no artifact) |
 
 ## Usage
@@ -72,15 +72,15 @@ if decision.skill:
     result = get_skill(decision.skill).run(**decision.args)
 ```
 
-From the summary CLI (`apps/summarization`):
+From the reports job (`apps/jobs`):
 
 ```bash
-python -m summary.run --list-skills
-python -m summary.run --skill generate_report --args ticker=AAPL
-python -m summary.run --skill compare_tickers --args '{"tickers":["AAPL","MSFT"]}'
+python -m reports.run --list-skills
+python -m reports.run --skill generate_report --args ticker=AAPL
+python -m reports.run --skill compare_tickers --args '{"tickers":["AAPL","MSFT"]}'
 ```
 
-From the backend chat endpoint: `apps/backend/main.py` already calls the router
+From the chat endpoint: `apps/api/main.py` already calls the router
 inside `/api/chat/stream`. Per message:
 
 ```python
@@ -178,5 +178,5 @@ CI runs the first one on ubuntu plus an import guard.
   loop, where a bad arg silently corrupts a whole trajectory.
 - `compare_tickers` lets the LLM build the metrics table. More robust would be
   to assemble it deterministically from `earnings` / `price_snapshot` and let the
-  LLM write only the prose around it — the pattern `apps/summarization/question`
+  LLM write only the prose around it — the pattern `apps/api/question`
   already uses.

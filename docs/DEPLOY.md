@@ -15,14 +15,16 @@ same monorepo, the same `.env` and the same service registry.
 | Service | Cloud Run name | Source | Dockerfile |
 |---|---|---|---|
 | embedding | `qa-embedding` | `apps/embedding` | `Dockerfile` |
-| question | `qa-question` | `apps/summarization` | `Dockerfile.question` |
-| backend | `qa-backend` | repo root | `apps/backend/Dockerfile` |
-| pipeline *(opt-in)* | `qa-pipeline` | `apps/pipeline` | `Dockerfile.api` |
+| api | `qa-api` | repo root | `apps/api/Dockerfile` |
 | frontend | — | `apps/web` | Vercel, see below |
+| jobs | — | repo root | `apps/jobs/Dockerfile` — run by GitHub Actions, see below |
 
-`deploy` without arguments does `embedding question backend`. `pipeline` is
-opt-in (`./deploy.sh deploy pipeline`) because the live-lookup API is only
-needed once ingestion is running in the cloud.
+`deploy` without arguments does `embedding api`.
+
+> Upgrading from the old layout? The previous Cloud Run services
+> `qa-backend`, `qa-question` and `qa-pipeline` are no longer deployed; delete
+> them (`gcloud run services delete …`) once `qa-api` is live, and rerun
+> `./deploy.sh bootstrap` so the `qa-api` service account exists.
 
 ## First time on a new project
 
@@ -56,10 +58,10 @@ repo-root `.env` and adds a new version only when it actually changed.
 
 | Secret | Used by |
 |---|---|
-| `SUPABASE_KEY` | backend, question, pipeline |
-| `SUPABASE_JWT_SECRET` | backend |
-| `ANTHROPIC_API_KEY` | backend, question |
-| `FINNHUB_API_KEY` `FMP_API_KEY` | pipeline |
+| `SUPABASE_KEY` | api |
+| `SUPABASE_JWT_SECRET` | api |
+| `ANTHROPIC_API_KEY` | api |
+| `FINNHUB_API_KEY` `FMP_API_KEY` | api (live lookups) |
 
 One secret, many consumers, one local file. On a new machine,
 `./dev.sh env pull` fills `.env` back in from Secret Manager.
@@ -67,10 +69,9 @@ One secret, many consumers, one local file. On a new machine,
 **Plain config** (`SUPABASE_URL`, model names, `ALLOWED_ORIGINS`, …) is copied
 verbatim from the repo-root `.env` at deploy time.
 
-**Service URLs** are never written down. `EMBEDDING_SERVICE_URL`,
-`QUESTION_SERVICE_URL` and `DATA_PIPELINE_URL` are resolved from what is
-actually live, in dependency order — embedding → pipeline → question → backend.
-A service physically cannot point at a stale URL.
+**Service URLs** are never written down. `EMBEDDING_SERVICE_URL` is resolved
+from what is actually live, in dependency order — embedding → api. A service
+physically cannot point at a stale URL.
 
 > `deploy` uses `--set-env-vars`, which **replaces** the whole env block. That
 > is intentional: the revision matches your `.env`, with no invisible leftovers
@@ -84,21 +85,28 @@ revision always maps back to a commit. A dirty working tree gets a `-dirty`
 suffix and a warning at preflight: you can ship it, you just cannot reproduce
 it.
 
-The backend is the exception worth understanding. Its build context is the
-**repo root**, not `apps/backend/`, so the image can install `libs/skills`
-from the same checkout — what you test locally is exactly what ships. The
-root `.dockerignore` keeps venvs, `.env` files and `apps/web` out of that
-context.
+The api and jobs images build from the **repo root**, not their app
+directory, so they can install `libs/` from the same checkout — what you test
+locally is exactly what ships. The root `.dockerignore` keeps venvs, `.env`
+files and `apps/web` out of that context.
+
+## Jobs
+
+Batch jobs (`apps/jobs`) run from GitHub Actions, not Cloud Run:
+`jobs-ingest.yml`, `jobs-briefing.yml` and `jobs-report-cache-cleanup.yml`.
+They read repo secrets `SUPABASE_URL`, `SUPABASE_KEY`, `ANTHROPIC_API_KEY`,
+`FINNHUB_API_KEY`, `FMP_API_KEY`, `EDGAR_USER_AGENT`. Ingest and briefing ship
+with their cron commented out — uncomment once the secrets are set.
 
 ## Frontend (Vercel)
 
 The frontend is a static Vite build and is not deployed by `deploy.sh`.
 
 ```bash
-./deploy.sh frontend                          # prints the backend URL to paste
+./deploy.sh frontend                          # prints the API URL to paste
 
-cd frontend
-vercel env add VITE_API_URL production        # the qa-backend URL
+cd apps/web
+vercel env add VITE_API_URL production        # the qa-api URL
 vercel --prod
 
 ./deploy.sh cors https://<your-app>.vercel.app
@@ -106,9 +114,9 @@ vercel --prod
 
 Two directions to wire, and both are easy to forget:
 
-- **Vercel → backend**: `VITE_API_URL`. Baked in at *build* time, so changing it
+- **Vercel → api**: `VITE_API_URL`. Baked in at *build* time, so changing it
   needs a redeploy, not a restart.
-- **backend → Vercel**: `ALLOWED_ORIGINS`. `./deploy.sh cors` sets it plus a
+- **api → Vercel**: `ALLOWED_ORIGINS`. `./deploy.sh cors` sets it plus a
   regex for preview deploys. Mirror it into `.env` so the next full
   deploy does not drop it.
 
@@ -116,7 +124,7 @@ Two directions to wire, and both are easy to forget:
 
 ```bash
 ./deploy.sh status              # revisions, newest first
-./deploy.sh rollback backend    # 100% traffic to the previous revision
+./deploy.sh rollback api        # 100% traffic to the previous revision
 ```
 
 Rollback is traffic-only and takes effect in seconds — it does not rebuild
@@ -137,17 +145,15 @@ ever found and hammered.
 
 ## Known gaps
 
-- **`qa-embedding` and `qa-question` are publicly reachable.** Making them
-  private needs the callers to attach an ID token, which is a code change in
-  `data-pipeline/pipeline/run.py` and `Summarization/question/retriever.py`.
-  Until then, `--max-instances` is the only thing bounding the damage.
+- **`qa-embedding` is publicly reachable.** Making it private needs the
+  callers to attach an ID token, a code change in
+  `apps/jobs/pipeline/run.py` and `apps/api/question/retriever.py`. Until then,
+  `--max-instances` is the only thing bounding the damage.
 - **The embedding image is much larger than it needs to be.** `sentence-transformers`
   pulls the default PyPI `torch`, which is the CUDA build; Cloud Run has no GPU.
   Installing from `https://download.pytorch.org/whl/cpu` and baking the model in
   at build time would cut the image by an order of magnitude and take the cold
   start from ~60s to a few seconds.
-- **The daily briefing is not running anywhere.** There is no workflow for
-  `apps/backend/briefing.py`; it needs an hourly `.github/workflows/` job or a
-  Cloud Scheduler → Cloud Run Job.
-- **Ingestion is not scheduled in the cloud.** `.github/workflows/pipeline-ingest.yml`
-  is `workflow_dispatch` only.
+- **Briefings and ingestion are not scheduled yet.** Their workflows exist
+  (`jobs-briefing.yml`, `jobs-ingest.yml`) with the cron commented out until
+  the GitHub secrets are configured.

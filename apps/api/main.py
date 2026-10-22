@@ -23,6 +23,7 @@ import asyncio
 import json
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -37,7 +38,8 @@ from files.routes import router as files_router
 from question.models import AskRequest
 from question.sse import ask_sse
 from research.context import fetch_context
-from summarizer import generate_summary, generate_briefing
+from research.briefing import build_briefing
+from summarizer import generate_summary
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,7 +64,7 @@ except ImportError as _skills_import_err:
     _SKILLS_AVAILABLE = False
     logging.error(
         "skills package unavailable — skill routing is DISABLED and all chat "
-        "will fall back to RAG. For local dev run `./dev.sh setup backend`; "
+        "will fall back to RAG. For local dev run `./dev.sh setup api`; "
         "for the container make sure the Dockerfile installs libs/skills. Cause: %s",
         _skills_import_err,
     )
@@ -199,24 +201,9 @@ def refresh_briefing(user_id: str = Depends(get_current_user)):
     if not tickers:
         raise HTTPException(status_code=400, detail="Watchlist is empty. Add tickers first.")
 
-    from datetime import datetime, timezone as tz
-    local_date = datetime.now(tz.utc).strftime("%Y-%m-%d")
-
-    contexts = []
-    for ticker in tickers:
-        try:
-            ctx = fetch_context(ticker, news_limit=50)
-            if ctx.total_chars > 0:
-                contexts.append(ctx)
-        except Exception as e:
-            logging.warning(f"Failed to fetch {ticker}: {e}")
-
-    if not contexts:
+    local_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if build_briefing(user_id, tickers, local_date) is None:
         raise HTTPException(status_code=404, detail="No data available for any watchlist ticker.")
-
-    content = generate_briefing(contexts)
-    header = f"# Daily Briefing — {local_date}\n\n> Tickers: {', '.join(tickers)}\n\n"
-    db.upsert_briefing(user_id, local_date, header + content, tickers)
     return {"status": "ok", "briefing_date": local_date}
 
 

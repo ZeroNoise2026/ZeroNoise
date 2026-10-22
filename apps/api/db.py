@@ -100,68 +100,6 @@ def get_briefings(user_id: str, limit: int = 7) -> list[dict]:
     )
 
 
-def get_users_needing_briefing() -> list[dict]:
-    """Fetch users with briefing_enabled=true who have at least one watchlist entry."""
-    client = get_client()
-    prefs = (
-        client.table("user_preferences")
-        .select("user_id, timezone")
-        .eq("briefing_enabled", True)
-        .execute()
-        .data
-    )
-    if not prefs:
-        return []
-
-    user_ids = [p["user_id"] for p in prefs]
-    watchlist = (
-        client.table("user_watchlist")
-        .select("user_id, ticker")
-        .in_("user_id", user_ids)
-        .execute()
-        .data
-    )
-
-    wl_by_user: dict[str, list[str]] = {}
-    for row in watchlist:
-        wl_by_user.setdefault(row["user_id"], []).append(row["ticker"])
-
-    results = []
-    for p in prefs:
-        uid = p["user_id"]
-        tickers = wl_by_user.get(uid, [])
-        if tickers:
-            results.append({
-                "user_id": uid,
-                "timezone": p["timezone"],
-                "tickers": sorted(tickers),
-            })
-    return results
-
-
-def briefing_exists(user_id: str, briefing_date: str) -> bool:
-    client = get_client()
-    resp = (
-        client.table("daily_briefings")
-        .select("user_id")
-        .eq("user_id", user_id)
-        .eq("briefing_date", briefing_date)
-        .limit(1)
-        .execute()
-    )
-    return len(resp.data) > 0
-
-
-def upsert_briefing(user_id: str, briefing_date: str, content: str, tickers: list[str]) -> None:
-    client = get_client()
-    client.table("daily_briefings").upsert({
-        "user_id": user_id,
-        "briefing_date": briefing_date,
-        "content": content,
-        "tickers": tickers,
-    }).execute()
-
-
 def get_briefing_by_date(user_id: str, briefing_date: str) -> Optional[dict]:
     """Fetch one briefing by exact date. Returns None if not generated that day."""
     client = get_client()
@@ -271,7 +209,7 @@ def append_chat_message(
     """Append a message; returns the inserted row's id (BIGSERIAL) or None on failure.
 
     `sources` is the citation payload (JSONB array) emitted by the
-    question-service `sources` SSE event. Pass None or [] for user messages
+    question flow's `sources` SSE event. Pass None or [] for user messages
     and for pre-citation history (left as NULL in DB).
 
     The bump_chat_session DB trigger updates last_message_at / message_count /

@@ -1,1 +1,1 @@
-"""question — real-time Q&A service (FastAPI :8003)"""
+"""question — the RAG Q&A flow behind /api/chat/stream."""

@@ -148,7 +148,7 @@ async def semantic_search(
 
     sources = []
     for d in docs:
-        # documents.id is a deterministic SHA256 (see data-pipeline/store.make_document_id),
+        # documents.id is a deterministic SHA256 (see apps/jobs/pipeline/store.make_document_id),
         # so the same chunk always gets the same Source.id across runs.
         doc_id = d.get("id") or ""
         sources.append(Source(

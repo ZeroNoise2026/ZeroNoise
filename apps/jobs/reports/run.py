@@ -1,14 +1,14 @@
 """
-summary/run.py
-Report CLI: generate research reports for tickers, or run any skill.
+reports/run.py
+Report job: generate research reports for tickers, or run any skill.
 
-Usage:
-    python -m summary.run --ticker AAPL
-    python -m summary.run --ticker AAPL,MSFT,NVDA
-    python -m summary.run --all
-    python -m summary.run --ticker AAPL --dry-run
-    python -m summary.run --skill compare_tickers --args '{"tickers":["AAPL","MSFT"]}'
-    python -m summary.run --list-skills
+Usage (from apps/jobs/):
+    python -m reports.run --ticker AAPL
+    python -m reports.run --ticker AAPL,MSFT,NVDA
+    python -m reports.run --all
+    python -m reports.run --ticker AAPL --dry-run
+    python -m reports.run --skill compare_tickers --args '{"tickers":["AAPL","MSFT"]}'
+    python -m reports.run --list-skills
 """
 
 import argparse
@@ -17,8 +17,8 @@ import logging
 import sys
 
 from config import OUTPUT_DIR
+from research.data import get_tracked_tickers
 from research.report import NoDataError, build_report
-from shared.db import get_tracked_tickers
 
 logging.basicConfig(
     level=logging.INFO,
@@ -109,7 +109,7 @@ def main():
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--ticker", type=str, help="Comma-separated ticker symbols (e.g. AAPL,MSFT)")
     group.add_argument("--all", action="store_true", help="Process all active tickers from Supabase")
-    group.add_argument("--skill", type=str, help="Run a skill by name (see `python -m summary.run --list-skills`)")
+    group.add_argument("--skill", type=str, help="Run a skill by name (see `python -m reports.run --list-skills`)")
     group.add_argument("--list-skills", action="store_true", help="List available skills and exit")
     parser.add_argument("--dry-run", action="store_true", help="Fetch data only, skip Claude API call")
     parser.add_argument("--args", type=str, default="", help='Skill arguments: JSON ({"k":"v"}) or k=v,k=v')
