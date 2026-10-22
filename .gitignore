@@ -12,3 +12,6 @@ dist/
 .DS_Store
 *.log
 ISSUES.md
+.deploy/
+.deployrc
+.devstack/
