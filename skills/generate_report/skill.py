@@ -9,7 +9,7 @@ caller. Instead we re-orchestrate the same five steps it does:
   1. fetch_context        — pull docs/earnings/prices from Supabase
   2. compute_input_hash   — for cache lookup
   3. get_cached           — return cached report if inputs are unchanged
-  4. generate_summary     — Moonshot call on cache miss
+  4. generate_summary     — Claude call on cache miss
   5. put_cached + save    — persist to Supabase cache + disk
 
 This keeps the skill in lockstep with the CLI's behavior (same cache key,
@@ -78,7 +78,7 @@ class GenerateReportSkill(Skill):
         # Imports are local because they require sys.path to be set up first
         # and we don't want to fail at import time of this skill module just
         # because Summarization isn't on PYTHONPATH yet.
-        from config import MOONSHOT_MODEL, OUTPUT_DIR  # noqa: E402
+        from config import LLM_MODEL_SUMMARY, OUTPUT_DIR  # noqa: E402
         from summary.cache import compute_input_hash, get_cached, put_cached  # noqa: E402
         from summary.fetcher import fetch_context  # noqa: E402
         from summary.prompts import PROMPT_VERSION  # noqa: E402
@@ -93,7 +93,7 @@ class GenerateReportSkill(Skill):
                 meta={"ticker": ticker, "empty": True},
             )
 
-        input_hash = compute_input_hash(ctx, MOONSHOT_MODEL, PROMPT_VERSION)
+        input_hash = compute_input_hash(ctx, LLM_MODEL_SUMMARY, PROMPT_VERSION)
         meta: dict[str, Any] = {
             "ticker": ticker,
             "doc_counts": ctx.doc_counts,
@@ -138,7 +138,7 @@ class GenerateReportSkill(Skill):
                     ticker=ticker,
                     input_hash=input_hash,
                     content=report,
-                    model=MOONSHOT_MODEL,
+                    model=LLM_MODEL_SUMMARY,
                     prompt_version=PROMPT_VERSION,
                     source_doc_ids=ctx.source_doc_ids,
                 )

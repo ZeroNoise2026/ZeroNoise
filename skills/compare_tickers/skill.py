@@ -15,6 +15,7 @@ here. Comparison needs concise per-ticker summaries plus an explicit
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -30,10 +31,10 @@ logger = logging.getLogger("skills.compare_tickers")
 _SUMMARIZATION_DIR = Path(__file__).resolve().parents[3] / "Summarization"
 
 # Per-ticker character budget. Three tickers × 80k ≈ 240k chars ≈ ~60k
-# tokens — fits comfortably in moonshot-v1-128k. Tune up if you switch
-# to kimi-k2.5 routinely.
+# tokens — well inside the 1M context and under Haiku's 100k-token
+# price tier. Raising it past ~130k per ticker crosses that tier.
 _PER_TICKER_BUDGET = 80_000
-_COMPARE_MODEL = "moonshot-v1-128k"
+_COMPARE_MODEL = os.environ.get("SKILLS_COMPARE_MODEL", "claude-haiku-5-5")
 
 
 _SYSTEM_PROMPT = """\
@@ -180,7 +181,6 @@ class CompareTickersSkill(Skill):
                 {"role": "user", "content": user_prompt},
             ],
             model=_COMPARE_MODEL,
-            temperature=0.3,
         )
 
         return SkillResult(

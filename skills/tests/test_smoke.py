@@ -7,7 +7,7 @@ What we're proving:
   2. Registry discovers generate_report and exposes its spec.
   3. Router parses a mocked LLM response into a RouteDecision.
   4. Skill.run() routes the call through registry → skill → SkillResult,
-     with all external IO (Moonshot + Supabase) mocked.
+     with all external IO (Claude + Supabase) mocked.
 
 Run from the repo root:
 
@@ -65,7 +65,7 @@ def test_router_no_api_key() -> None:
     import os
     from skills import router
 
-    with mock.patch.dict(os.environ, {"MOONSHOT_API_KEY": ""}, clear=False):
+    with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": ""}, clear=False):
         # has_api_key reads env on each call, so this works without reload.
         decision = router.route("generate a report on AAPL")
     check("skill is None", decision.skill is None,
@@ -114,7 +114,7 @@ def test_generate_report_dry_run_with_mocked_supabase(tmp_path: Path) -> None:
     )
 
     fake_config = types.ModuleType("config")
-    fake_config.MOONSHOT_MODEL = "kimi-k2.5"
+    fake_config.LLM_MODEL_SUMMARY = "claude-sonnet-5-5"
     fake_config.OUTPUT_DIR = tmp_path
 
     fake_fetcher = types.ModuleType("summary.fetcher")
@@ -196,7 +196,7 @@ def test_compare_tickers_with_mocks() -> None:
 
     chat_calls: list[dict] = []
 
-    def fake_chat(messages, *, model, temperature=0.3, **kw):
+    def fake_chat(messages, *, model, **kw):
         chat_calls.append({"model": model, "messages": messages})
         return ("# Mocked comparison\n| ticker | foo |\n", {"prompt_tokens": 100,
                                                              "completion_tokens": 50,
@@ -291,7 +291,7 @@ def test_generate_report_full_path_with_mocks(tmp_path: Path) -> None:
     )
 
     fake_config = types.ModuleType("config")
-    fake_config.MOONSHOT_MODEL = "kimi-k2.5"
+    fake_config.LLM_MODEL_SUMMARY = "claude-sonnet-5-5"
     fake_config.OUTPUT_DIR = tmp_path
 
     fake_fetcher = types.ModuleType("summary.fetcher")

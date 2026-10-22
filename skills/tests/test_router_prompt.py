@@ -1,6 +1,6 @@
 """
 skills/tests/test_router_prompt.py
-Sanity-check the router prompt by inspecting what would be sent to Moonshot,
+Sanity-check the router prompt by inspecting what would be sent to Claude,
 without making the real API call. Useful when iterating on prompt wording
 or skill descriptions.
 
@@ -15,7 +15,7 @@ def main() -> int:
 
     prompt = _build_system_prompt()
     print("=" * 60)
-    print("ROUTER SYSTEM PROMPT (what gets sent to Moonshot):")
+    print("ROUTER SYSTEM PROMPT (what gets sent to Claude):")
     print("=" * 60)
     print(prompt)
     print("=" * 60)
