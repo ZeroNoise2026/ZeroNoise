@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  import-guard:
+    # ubuntu-latest has a CASE-SENSITIVE filesystem, which is the entire point
+    # of this job. macOS silently tolerates `import skills` resolving to a
+    # directory named `Skills`; Linux, Docker and Cloud Run do not. This job is
+    # where that class of bug surfaces, instead of in production.
+    runs-on: ubuntu-latest
+
+    steps:
+      # Check out into "Skills" — the exact directory name that
+      # `git clone .../Skills.git` produces — so CI reproduces the real
+      # developer layout rather than a conveniently-named one.
+      - name: Check out Skills
+        uses: actions/checkout@v4
+        with:
+          path: Skills
+
+      # The smoke suite reaches into the sibling repo to exercise the CLI arg
+      # parser, so the checkout layout has to match a real working copy.
+      - name: Check out sibling Summarization
+        uses: actions/checkout@v4
+        with:
+          repository: ZeroNoise2026/Summarization
+          path: Summarization
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Installing the package is also how the container image gets it
+      # (see QuantAgent/backend/requirements.txt), so this validates that path.
+      - name: Install skills package
+        run: pip install -e ./Skills
+
+      - name: Import guard
+        run: |
+          python - <<'PY'
+          import skills
+          from skills.router import _build_system_prompt
+
+          names = skills.list_skills()
+          print("registered skills:", names)
+
+          missing = {"generate_report", "compare_tickers"} - set(names)
+          assert not missing, f"registry failed to discover: {sorted(missing)}"
+          assert _build_system_prompt().strip(), "router system prompt is empty"
+          print("OK: `import skills` resolves and the registry is populated")
+          PY
+
+      - name: Offline smoke suite
+        working-directory: Skills
+        run: python -m skills.tests.test_smoke

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantagent-skills"
+version = "0.1.0"
+description = "Shared skill framework for the QuantAgent project"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=2.1.0",
+]
+
+[project.optional-dependencies]
+# Only needed by skills/tests/test_live_router.py, which reads Summarization/.env
+dev = [
+    "python-dotenv>=1.0",
+]
+
+[tool.setuptools]
+# The importable package lives in skills/ — a real, git-tracked directory.
+# This is deliberate: the package name must not depend on what the clone
+# folder happens to be called. `git clone .../Skills.git` produces "Skills",
+# which does not match `import skills` on a case-sensitive filesystem.
+packages = [
+    "skills",
+    "skills.compare_tickers",
+    "skills.generate_report",
+]
+
+[tool.setuptools.package-data]
+# SKILL.md is read at runtime by Skill.skill_md(), so it must ship with the
+# package rather than being treated as repo-only documentation.
+"skills.compare_tickers" = ["SKILL.md"]
+"skills.generate_report" = ["SKILL.md"]
